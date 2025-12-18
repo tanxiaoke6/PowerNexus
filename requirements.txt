@@ -1,0 +1,92 @@
+# ============================================================================
+# PowerNexus - 完整依赖清单
+# 自主电网巡检与动态调度系统 (Qwen 模型族版本)
+# ============================================================================
+
+# ===== 核心框架 =====
+# PyTorch - 深度学习框架
+torch>=2.0.0
+torchvision>=0.15.0
+
+# ===== Qwen 模型系列 (核心) =====
+# Transformers - HuggingFace 模型库
+transformers>=4.40.0
+# Accelerate - 分布式训练加速
+accelerate>=0.27.0
+# BitsAndBytes - 4-bit 量化
+bitsandbytes>=0.42.0
+# Qwen-VL 工具库
+qwen-vl-utils>=0.0.8
+
+# ===== 强化学习 =====
+# Stable-Baselines3 - PPO 算法实现
+stable-baselines3>=2.0.0
+# Gymnasium - RL 环境接口
+gymnasium>=0.28.0
+# Grid2Op - 电网仿真环境
+grid2op>=1.9.0
+# LightSim2Grid - 快速潮流计算
+lightsim2grid>=0.7.0
+
+# ===== RAG 知识库 =====
+# LangChain - LLM 应用框架
+langchain>=0.1.0
+# ChromaDB - 向量数据库
+chromadb>=0.4.0
+# SentenceTransformers - 文本嵌入模型
+sentence-transformers>=2.2.0
+
+# ===== Web 界面 =====
+# Streamlit - 仪表板框架
+streamlit>=1.28.0
+
+# ===== 图像处理 =====
+# Pillow - 图像处理
+pillow>=10.0.0
+
+# ===== 文档处理 =====
+# ReportLab - PDF 生成
+reportlab>=4.0.0
+# PyPDF - PDF 解析
+pypdf>=3.0.0
+
+# ===== 可视化 =====
+# Matplotlib - 绑图
+matplotlib>=3.7.0
+
+# ===== 工具库 =====
+# 环境变量管理
+python-dotenv>=1.0.0
+# YAML 配置
+pyyaml>=6.0.0
+# 进度条
+tqdm>=4.66.0
+# 数值计算
+numpy>=1.24.0
+# 数据处理
+pandas>=2.0.0
+
+# ===== 开发工具 =====
+# 测试框架
+pytest>=7.4.0
+
+# ============================================================================
+# 安装说明
+# ============================================================================
+#
+# 最小安装 (Mock 模式):
+#   pip install numpy pillow streamlit
+#
+# Qwen 模型安装:
+#   pip install transformers accelerate bitsandbytes qwen-vl-utils
+#
+# 完整安装:
+#   pip install -r requirements.txt
+#
+# GPU 加速:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu121
+#
+# 运行仪表板:
+#   streamlit run src/app.py
+#
+# ============================================================================
