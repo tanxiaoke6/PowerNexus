@@ -141,7 +141,7 @@ python tools/simulate_grid_state.py -n 100 -s mixed -o data/grid_states.npz
 streamlit run src/app.py
 ```
 
-#### � Document Ingestion (RAG Knowledge Base)
+#### Document Ingestion (RAG Knowledge Base)
 
 To use the RAG knowledge retrieval feature, you need to ingest your documents (PDF, TXT, Markdown) into the vector database:
 
@@ -161,7 +161,7 @@ ingestor.ingest_directory('data/manuals')
 
 > **Note**: The embedding model (`all-MiniLM-L6-v2`) may take 1-2 minutes to load on first run.
 
-### �📦 Dependencies
+###📦 Dependencies
 
 #### Core Dependencies
 
