@@ -56,7 +56,7 @@ rl:
 # 应用通用配置
 # ====================
 app:
-  use_mock: false
+  use_mock: true
   log_level: "INFO"
   port: 8501
   preload_models: false

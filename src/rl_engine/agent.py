@@ -109,20 +109,20 @@ class TrainingConfig:
     
     Attributes:
         total_timesteps: 总训练步数
-        eval_freq: 评估频率
+        eval_freq: 评估频率 (每 N 步进行一次评估)
         n_eval_episodes: 每次评估的 episode 数
-        save_freq: 模型保存频率
-        save_path: 模型保存路径
+        save_freq: 检查点保存频率 (每 N 步保存一次)
+        save_path: 检查点保存路径
         best_model_save_path: 最佳模型保存路径
-        log_path: 日志路径
+        log_path: 训练日志路径
     """
-    total_timesteps: int = 1_000_000
-    eval_freq: int = 10_000
-    n_eval_episodes: int = 5
-    save_freq: int = 50_000
+    total_timesteps: int = 100_000
+    eval_freq: int = 2048  # 每 2048 步评估一次（与 n_steps 对应）
+    n_eval_episodes: int = 3
+    save_freq: int = 2048  # 每 2048 步保存检查点
     save_path: str = "./models/rl/checkpoints"
     best_model_save_path: str = "./models/rl/best_model"
-    log_path: str = "./logs/rl_training"
+    log_path: str = "./models/rl/logs"  # 训练日志
 
 
 # ============================================================================
@@ -445,28 +445,45 @@ class PPO_Agent:
         callbacks = []
         
         if SB3_AVAILABLE and not self._use_mock:
+            # 确保保存目录存在
+            save_path = Path(config.save_path)
+            save_path.mkdir(parents=True, exist_ok=True)
+            
+            best_model_path = Path(config.best_model_save_path)
+            best_model_path.mkdir(parents=True, exist_ok=True)
+            
+            log_path = Path(config.log_path)
+            log_path.mkdir(parents=True, exist_ok=True)
+            
             # 检查点回调
             checkpoint_callback = CheckpointCallback(
                 save_freq=config.save_freq,
-                save_path=config.save_path,
+                save_path=str(save_path),
                 name_prefix="ppo_grid",
             )
             callbacks.append(checkpoint_callback)
             
-            # 评估回调
-            eval_env = make_power_grid_env(
-                env_name=self.env_config.env_name,
-                use_mock=self._use_mock or self.env_config.use_mock,
-            )
-            eval_callback = EvalCallback(
-                eval_env,
-                best_model_save_path=config.best_model_save_path,
-                log_path=config.log_path,
-                eval_freq=config.eval_freq,
-                n_eval_episodes=config.n_eval_episodes,
-                deterministic=True,
-            )
-            callbacks.append(eval_callback)
+            # 评估回调 - 需要用 Monitor 包装评估环境
+            try:
+                eval_env = make_power_grid_env(
+                    env_name=self.env_config.env_name,
+                    use_mock=self._use_mock or self.env_config.use_mock,
+                )
+                # 用 Monitor 包装评估环境
+                eval_env = Monitor(eval_env)
+                
+                eval_callback = EvalCallback(
+                    eval_env,
+                    best_model_save_path=str(best_model_path),
+                    log_path=str(log_path),
+                    eval_freq=config.eval_freq,
+                    n_eval_episodes=config.n_eval_episodes,
+                    deterministic=True,
+                )
+                callbacks.append(eval_callback)
+                logger.info(f"评估回调已创建 | best_model: {best_model_path} | logs: {log_path}")
+            except Exception as e:
+                logger.warning(f"创建评估回调失败，跳过评估: {e}")
         
         # 添加自定义回调
         if callback:
@@ -617,6 +634,7 @@ class PPO_Agent:
         self,
         n_eval_episodes: int = 10,
         deterministic: bool = True,
+        max_steps_per_episode: int = 100,
     ) -> Dict[str, float]:
         """
         评估智能体性能
@@ -624,42 +642,81 @@ class PPO_Agent:
         Args:
             n_eval_episodes: 评估 episode 数量
             deterministic: 是否使用确定性策略
+            max_steps_per_episode: 每个 episode 最大步数
             
         Returns:
             评估指标字典
         """
         logger.info(f"开始评估 | Episodes: {n_eval_episodes}")
         
+        # 创建新的评估环境，避免训练后环境状态不稳定
+        try:
+            eval_env = make_power_grid_env(
+                env_name=self.env_config.env_name,
+                use_mock=self._use_mock or self.env_config.use_mock,
+            )
+        except Exception as e:
+            logger.warning(f"创建评估环境失败: {e}，使用训练环境")
+            eval_env = self.env
+        
         episode_rewards = []
         episode_lengths = []
         
-        for ep in range(n_eval_episodes):
-            obs, info = self.env.reset()
-            done = False
-            truncated = False
-            total_reward = 0
-            step_count = 0
-            
-            while not (done or truncated):
-                action = self.predict_action(obs, deterministic=deterministic)
-                obs, reward, done, truncated, info = self.env.step(action)
-                total_reward += reward
-                step_count += 1
-            
-            episode_rewards.append(total_reward)
-            episode_lengths.append(step_count)
-            
-            logger.debug(f"  Episode {ep+1}: reward={total_reward:.2f}, steps={step_count}")
+        try:
+            for ep in range(n_eval_episodes):
+                try:
+                    obs, info = eval_env.reset()
+                except Exception as e:
+                    logger.warning(f"环境重置失败: {e}")
+                    break
+                    
+                done = False
+                truncated = False
+                total_reward = 0
+                step_count = 0
+                
+                while not (done or truncated) and step_count < max_steps_per_episode:
+                    try:
+                        action = self.predict_action(obs, deterministic=deterministic)
+                        obs, reward, done, truncated, info = eval_env.step(action)
+                        total_reward += reward
+                        step_count += 1
+                    except Exception as e:
+                        logger.warning(f"评估步骤失败: {e}")
+                        done = True
+                        break
+                
+                episode_rewards.append(total_reward)
+                episode_lengths.append(step_count)
+                
+                logger.debug(f"  Episode {ep+1}: reward={total_reward:.2f}, steps={step_count}")
+        finally:
+            # 关闭评估环境
+            if eval_env is not self.env:
+                try:
+                    eval_env.close()
+                except:
+                    pass
         
         # 计算统计指标
-        results = {
-            "mean_reward": float(np.mean(episode_rewards)),
-            "std_reward": float(np.std(episode_rewards)),
-            "min_reward": float(np.min(episode_rewards)),
-            "max_reward": float(np.max(episode_rewards)),
-            "mean_length": float(np.mean(episode_lengths)),
-            "n_episodes": n_eval_episodes,
-        }
+        if episode_rewards:
+            results = {
+                "mean_reward": float(np.mean(episode_rewards)),
+                "std_reward": float(np.std(episode_rewards)),
+                "min_reward": float(np.min(episode_rewards)),
+                "max_reward": float(np.max(episode_rewards)),
+                "mean_length": float(np.mean(episode_lengths)),
+                "n_episodes": len(episode_rewards),
+            }
+        else:
+            results = {
+                "mean_reward": 0.0,
+                "std_reward": 0.0,
+                "min_reward": 0.0,
+                "max_reward": 0.0,
+                "mean_length": 0.0,
+                "n_episodes": 0,
+            }
         
         logger.info(
             f"评估完成 | "

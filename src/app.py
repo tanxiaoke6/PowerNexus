@@ -815,6 +815,61 @@ with tab3:
     with col2:
         st.subheader("RL 决策结果")
         
+        # 模型加载部分
+        st.markdown("**📦 模型选择**")
+        
+        # 检查本地模型
+        default_model_path = "models/rl/ppo_grid.zip"
+        model_exists = Path(default_model_path).exists()
+        
+        model_source = st.radio(
+            "模型来源",
+            ["使用默认/Mock 模型", "加载本地训练模型", "上传模型文件"],
+            horizontal=True,
+            help="选择要使用的 PPO 模型"
+        )
+        
+        model_path = None
+        
+        if model_source == "加载本地训练模型":
+            if model_exists:
+                st.success(f"✅ 找到本地模型: `{default_model_path}`")
+                model_path = default_model_path
+                
+                # 显示模型信息
+                model_stat = Path(default_model_path).stat()
+                model_size_kb = model_stat.st_size / 1024
+                from datetime import datetime as dt
+                model_time = dt.fromtimestamp(model_stat.st_mtime).strftime('%Y-%m-%d %H:%M:%S')
+                st.caption(f"📊 大小: {model_size_kb:.1f} KB | 修改时间: {model_time}")
+            else:
+                st.warning(f"⚠️ 本地模型不存在: `{default_model_path}`")
+                st.markdown("请先运行训练：")
+                st.code("python tools/train_ppo.py --timesteps 2048", language="bash")
+                
+                # 允许指定其他路径
+                custom_path = st.text_input("或输入自定义模型路径", placeholder="models/rl/your_model.zip")
+                if custom_path and Path(custom_path).exists():
+                    model_path = custom_path
+                    st.success(f"✅ 找到模型: `{custom_path}`")
+                    
+        elif model_source == "上传模型文件":
+            uploaded_model = st.file_uploader(
+                "上传 PPO 模型 (.zip)",
+                type=["zip"],
+                help="上传 Stable-Baselines3 训练的 PPO 模型"
+            )
+            if uploaded_model:
+                # 保存上传的模型
+                upload_path = Path("models/rl/uploaded_model.zip")
+                upload_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(upload_path, "wb") as f:
+                    f.write(uploaded_model.getbuffer())
+                model_path = str(upload_path)
+                st.success(f"✅ 模型已上传: `{model_path}`")
+        
+        st.markdown("---")
+        
         if st.button("🎯 执行 RL 优化", type="primary", use_container_width=True):
             if not RL_AVAILABLE:
                 st.error("RL 模块未加载")
@@ -823,8 +878,20 @@ with tab3:
             else:
                 with st.spinner("PPO 智能体正在分析..."):
                     try:
-                        # 创建智能体
-                        agent = create_ppo_agent(use_mock=use_mock)
+                        # 根据选择创建智能体
+                        if model_path and Path(model_path).exists():
+                            st.caption(f"🔧 加载模型: `{model_path}`")
+                            from src.rl_engine import PPO_Agent, PowerGridEnvConfig
+                            env_config = PowerGridEnvConfig(use_mock=use_mock)
+                            agent = PPO_Agent(
+                                env_config=env_config,
+                                model_path=model_path,
+                                use_mock=use_mock,
+                                enable_llm=not use_mock,
+                            )
+                        else:
+                            st.caption("🔧 使用默认模型")
+                            agent = create_ppo_agent(use_mock=use_mock)
                         
                         # 构造完整观测向量
                         if data_source == "从文件加载 (grid_states.npz)" and 'gen_p' in dir():
@@ -890,6 +957,129 @@ with tab3:
                         import traceback
                         with st.expander("查看错误详情"):
                             st.code(traceback.format_exc())
+        
+        # PPO 训练部分
+        st.markdown("---")
+        st.subheader("🎓 PPO 模型训练")
+        
+        with st.expander("训练参数设置", expanded=False):
+            train_col1, train_col2 = st.columns(2)
+            
+            with train_col1:
+                train_timesteps = st.number_input(
+                    "训练步数",
+                    min_value=100,
+                    max_value=1_000_000,
+                    value=10_000,
+                    step=1000,
+                    help="更多步数 = 更好的模型，但训练时间更长"
+                )
+                
+                learning_rate = st.select_slider(
+                    "学习率",
+                    options=[1e-5, 3e-5, 1e-4, 3e-4, 1e-3],
+                    value=3e-4,
+                    format_func=lambda x: f"{x:.0e}"
+                )
+            
+            with train_col2:
+                save_path = st.text_input(
+                    "模型保存路径",
+                    value="models/rl/ppo_grid.zip",
+                    help="训练完成后模型保存位置"
+                )
+                
+                eval_episodes = st.slider(
+                    "评估 Episode 数",
+                    min_value=0,
+                    max_value=20,
+                    value=5,
+                    help="训练后评估模型性能"
+                )
+        
+        if st.button("🚀 开始训练 PPO", type="secondary", use_container_width=True):
+            if not RL_AVAILABLE:
+                st.error("RL 模块未加载")
+            else:
+                # 导入训练配置
+                from src.rl_engine import PPOAgentConfig, TrainingConfig, PPO_Agent, PowerGridEnvConfig
+                
+                # 创建进度显示
+                progress_bar = st.progress(0, text="准备训练...")
+                status_text = st.empty()
+                
+                try:
+                    # 配置
+                    from pathlib import Path
+                    env_config = PowerGridEnvConfig(use_mock=use_mock)
+                    agent_config = PPOAgentConfig(learning_rate=learning_rate)
+                    
+                    # 设置保存路径
+                    model_dir = Path(save_path).parent
+                    training_config = TrainingConfig(
+                        total_timesteps=train_timesteps,
+                        save_path=str(model_dir / "checkpoints"),
+                        best_model_save_path=str(model_dir / "best_model"),
+                        log_path=str(model_dir / "logs"),
+                    )
+                    
+                    status_text.text("创建 PPO 智能体...")
+                    progress_bar.progress(10, text="创建智能体...")
+                    
+                    agent = PPO_Agent(
+                        env_config=env_config,
+                        agent_config=agent_config,
+                        use_mock=use_mock,
+                        enable_llm=False,
+                    )
+                    
+                    status_text.text(f"开始训练 ({train_timesteps:,} 步)...")
+                    progress_bar.progress(20, text="训练中...")
+                    
+                    # 训练
+                    with st.spinner(f"PPO 训练中 ({train_timesteps:,} 步)..."):
+                        result = agent.train_model(
+                            total_timesteps=train_timesteps,
+                            training_config=training_config,
+                            progress_bar=False,
+                        )
+                    
+                    progress_bar.progress(80, text="保存模型...")
+                    
+                    if result["status"] == "success":
+                        # 保存模型
+                        agent.save(save_path)
+                        progress_bar.progress(90, text="评估模型...")
+                        
+                        # 评估
+                        if eval_episodes > 0:
+                            eval_result = agent.evaluate(n_eval_episodes=eval_episodes)
+                            
+                            progress_bar.progress(100, text="完成!")
+                            st.success(f"✅ 训练完成! 模型已保存到 `{save_path}`")
+                            
+                            # 显示评估结果
+                            eval_col1, eval_col2, eval_col3 = st.columns(3)
+                            with eval_col1:
+                                st.metric("平均奖励", f"{eval_result['mean_reward']:.2f}")
+                            with eval_col2:
+                                st.metric("奖励标准差", f"±{eval_result['std_reward']:.2f}")
+                            with eval_col3:
+                                st.metric("平均步数", f"{eval_result['mean_length']:.1f}")
+                        else:
+                            progress_bar.progress(100, text="完成!")
+                            st.success(f"✅ 训练完成! 模型已保存到 `{save_path}`")
+                    else:
+                        st.error(f"训练失败: {result.get('error', '未知错误')}")
+                        
+                except Exception as e:
+                    st.error(f"训练失败: {e}")
+                    import traceback
+                    with st.expander("查看错误详情"):
+                        st.code(traceback.format_exc())
+        
+        # 提示使用命令行训练
+        st.caption("💡 提示: 对于长时间训练，建议使用命令行: `python tools/train_ppo.py --timesteps 100000`")
 
 
 # ============================================================================
