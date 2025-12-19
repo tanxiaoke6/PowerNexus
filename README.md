@@ -246,9 +246,6 @@ Special thanks to **Google Gemini** for AI-assisted development.
 ## ⚠️ Disclaimer
 
 1. **For Research Only**: This project is intended for research and educational purposes only.
-2. **No Production Use**: Do not use this system for actual power grid operations without proper validation.
-3. **Model Limitations**: AI models may produce incorrect or hallucinated outputs.
-4. **Safety First**: Always verify AI-generated recommendations with domain experts before implementation.
 
 ---
 
