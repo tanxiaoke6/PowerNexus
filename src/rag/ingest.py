@@ -33,6 +33,17 @@ logger = logging.getLogger(__name__)
 
 CHROMADB_AVAILABLE = False
 SENTENCE_TRANSFORMERS_AVAILABLE = False
+OPENAI_AVAILABLE = False
+
+try:
+    from openai import OpenAI
+    OPENAI_AVAILABLE = True
+    logger.info("OpenAI client 已导入")
+except ImportError as e:
+    import sys
+    logger.warning(f"OpenAI 未安装: {e}")
+    logger.warning(f"Python Executable: {sys.executable}")
+    OpenAI = None
 
 try:
     import chromadb
@@ -61,6 +72,31 @@ except ImportError:
 # 配置数据类
 # ============================================================================
 
+# 导入全局配置
+try:
+    from config.settings import config as global_config
+    SETTINGS_AVAILABLE = True
+except ImportError:
+    global_config = None
+    SETTINGS_AVAILABLE = False
+    logger.warning("无法导入 config.settings，使用默认配置")
+
+# 获取默认值
+def _get_embedding_model():
+    if SETTINGS_AVAILABLE and global_config:
+        return global_config.rag.embedding_model
+    return "/home/tanxk/xiaoke/all-MiniLM-L6-v2"
+
+def _get_collection_name():
+    if SETTINGS_AVAILABLE and global_config:
+        return global_config.rag.collection_name
+    return "power_grid_standards"
+
+def _get_persist_directory():
+    if SETTINGS_AVAILABLE and global_config:
+        return global_config.rag.persist_directory
+    return "./data/vector_db"
+
 @dataclass
 class IngestConfig:
     """
@@ -73,13 +109,24 @@ class IngestConfig:
         collection_name: ChromaDB 集合名称
         persist_directory: ChromaDB 持久化目录
         batch_size: 批量处理大小
+        device: 嵌入模型运行设备 ('cuda', 'cpu', 'cuda:0' 等)
     """
-    chunk_size: int = 500
+    chunk_size: int = 150
     chunk_overlap: int = 50
-    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
-    collection_name: str = "power_grid_standards"
-    persist_directory: str = "./data/vector_db"
-    batch_size: int = 100
+    embedding_model: str = None
+    collection_name: str = None
+    persist_directory: str = None
+    batch_size: int = 64           # 批量大小，越大越快但占用更多显存
+    device: Optional[str] = None   # None 表示自动选择最空闲的 GPU
+    
+    def __post_init__(self):
+        # 从 settings 读取默认值
+        if self.embedding_model is None:
+            self.embedding_model = _get_embedding_model()
+        if self.collection_name is None:
+            self.collection_name = _get_collection_name()
+        if self.persist_directory is None:
+            self.persist_directory = _get_persist_directory()
 
 
 # ============================================================================
@@ -136,6 +183,76 @@ class MockEmbeddingModel:
             embeddings.append(embedding)
         
         return np.array(embeddings)
+
+
+class APIEmbeddingModel:
+    """
+    API 嵌入模型封装
+    
+    使用 OpenAI 兼容的 API 生成嵌入向量。
+    """
+    
+    def __init__(self, model_name: str = "text-embedding-v3"):
+        """
+        初始化 API 嵌入模型
+        
+        Args:
+            model_name: 模型名称
+        """
+        if not OPENAI_AVAILABLE:
+            raise ImportError("需要安装 openai 库: pip install openai")
+        
+        # 从全局配置读取 API 设置
+        if SETTINGS_AVAILABLE and global_config:
+            api_base_url = global_config.rag.embedding_api_base_url
+            api_key = global_config.rag.embedding_api_key
+            self.model_name = global_config.rag.embedding_model
+        else:
+            raise ValueError("无法获取全局配置")
+        
+        if not api_base_url or not api_key:
+            raise ValueError("请在 config.yaml 中配置 rag 的 embedding_api_base_url 和 embedding_api_key")
+        
+        self.client = OpenAI(
+            base_url=api_base_url,
+            api_key=api_key,
+        )
+        self.embedding_dim = 1024  # 可根据实际模型调整
+        logger.info(f"API 嵌入模型已初始化 | Model: {self.model_name}")
+    
+    def encode(
+        self,
+        sentences: Union[str, List[str]],
+        show_progress_bar: bool = False,
+        **kwargs,
+    ) -> np.ndarray:
+        """
+        生成文本嵌入向量
+        
+        Args:
+            sentences: 输入文本或文本列表
+            show_progress_bar: 是否显示进度条（忽略）
+            
+        Returns:
+            嵌入向量数组
+        """
+        if isinstance(sentences, str):
+            sentences = [sentences]
+        
+        try:
+            response = self.client.embeddings.create(
+                model=self.model_name,
+                input=sentences,
+            )
+            
+            embeddings = []
+            for item in response.data:
+                embeddings.append(item.embedding)
+            
+            return np.array(embeddings, dtype=np.float32)
+        except Exception as e:
+            logger.error(f"API 嵌入调用失败: {e}")
+            raise
 
 
 class MockVectorStore:
@@ -410,38 +527,59 @@ class TextChunker:
         Returns:
             分块列表
         """
+        if not text or not text.strip():
+            return []
+        
+        text = text.strip()
+        
         if len(text) <= self.chunk_size:
-            return [text.strip()] if text.strip() else []
+            return [text]
         
         chunks = []
         current_pos = 0
+        text_len = len(text)
         
-        while current_pos < len(text):
+        while current_pos < text_len:
             # 确定当前块的结束位置
-            end_pos = min(current_pos + self.chunk_size, len(text))
+            end_pos = min(current_pos + self.chunk_size, text_len)
             
             # 如果不是最后一块，尝试在分隔符处断开
-            if end_pos < len(text):
-                best_split = end_pos
+            if end_pos < text_len:
+                # 只在有效范围内查找分隔符
+                search_start = max(current_pos + self.chunk_size // 2, current_pos)
+                best_split = -1
+                
                 for sep in self.separators:
                     if not sep:
                         continue
-                    # 在 chunk 范围内查找最后一个分隔符
-                    last_sep = text.rfind(sep, current_pos, end_pos)
-                    if last_sep > current_pos:
-                        best_split = last_sep + len(sep)
+                    # 查找最后一个分隔符
+                    idx = text.rfind(sep, search_start, end_pos)
+                    if idx > current_pos:
+                        best_split = idx + len(sep)
                         break
-                end_pos = best_split
+                
+                if best_split > current_pos:
+                    end_pos = best_split
             
             # 提取块
             chunk = text[current_pos:end_pos].strip()
             if chunk:
                 chunks.append(chunk)
             
-            # 移动到下一个位置（考虑重叠）
-            current_pos = end_pos - self.chunk_overlap
-            if current_pos >= len(text) - self.chunk_overlap:
-                break
+            # 移动到下一个位置
+            # 确保每次至少前进 chunk_size - chunk_overlap，避免无限循环
+            step = max(1, self.chunk_size - self.chunk_overlap)
+            next_pos = current_pos + step
+            
+            # 如果找到了分隔符，从分隔符位置继续（减去重叠）
+            if end_pos > current_pos + step:
+                next_pos = max(next_pos, end_pos - self.chunk_overlap)
+            
+            # 确保有进展，避免无限循环
+            if next_pos <= current_pos:
+                next_pos = current_pos + 1
+            
+            current_pos = next_pos
         
         return chunks
     
@@ -489,32 +627,86 @@ class EmbeddingModel:
         self,
         model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
         use_mock: bool = False,
+        device: Optional[str] = None,
+        batch_size: int = 64,
     ):
         """
         初始化嵌入模型
         
         Args:
-            model_name: HuggingFace 模型名称
+            model_name: HuggingFace 模型名称或本地路径
             use_mock: 是否强制使用 Mock 模型
+            device: 设备 ('cuda', 'cpu', 'cuda:0' 等)，None 表示自动选择
+            batch_size: 批量处理大小
         """
         self.model_name = model_name
-        self._use_mock = use_mock or not SENTENCE_TRANSFORMERS_AVAILABLE
+        self._use_mock = use_mock
+        self._use_api = False
+        self._batch_size = batch_size
         
-        if self._use_mock:
+        if use_mock:
             self._model = MockEmbeddingModel(model_name)
         else:
-            self._model = SentenceTransformer(model_name)
+            # 优先使用 API 模式
+            if OPENAI_AVAILABLE and SETTINGS_AVAILABLE and global_config and global_config.rag.embedding_api_key:
+                try:
+                    self._model = APIEmbeddingModel(model_name)
+                    self._use_api = True
+                    logger.info("使用嵌入 API 模式")
+                except Exception as e:
+                    logger.warning(f"加载嵌入 API 失败: {e}，尝试本地模型")
+                    self._model = None
+            else:
+                self._model = None
+            
+            # 如果 API 模式不可用，尝试本地模型
+            if self._model is None:
+                if SENTENCE_TRANSFORMERS_AVAILABLE:
+                    # 自动选择设备
+                    if device is None:
+                        try:
+                            from config.settings import get_device
+                            device = get_device()
+                        except ImportError:
+                            import torch
+                            if torch.cuda.is_available():
+                                device = "cuda:0"
+                            else:
+                                device = "cpu"
+                    
+                    # 处理 "auto" 设备字符串
+                    if device == "auto":
+                        import torch
+                        if torch.cuda.is_available():
+                            device = "cuda"
+                        else:
+                            device = "cpu"
+                    
+                    logger.info(f"正在加载嵌入模型到 {device}...")
+                    self._model = SentenceTransformer(model_name, device=device)
+                    logger.info("使用嵌入本地模型")
+                else:
+                    logger.warning("依赖不完整，使用 Mock 嵌入模式")
+                    self._model = MockEmbeddingModel(model_name)
+                    self._use_mock = True
+        
+        self._device = device if not self._use_api else "api"
         
         logger.info(
             f"嵌入模型初始化完成 | "
             f"模型: {model_name} | "
-            f"Mock 模式: {self._use_mock}"
+            f"API: {self._use_api} | "
+            f"Mock: {self._use_mock}"
         )
+    
+
+
     
     def embed(
         self,
         texts: Union[str, List[str]],
-        show_progress_bar: bool = False,
+        show_progress_bar: bool = True,
+        batch_size: Optional[int] = None,
     ) -> np.ndarray:
         """
         生成文本嵌入
@@ -522,6 +714,7 @@ class EmbeddingModel:
         Args:
             texts: 输入文本或列表
             show_progress_bar: 是否显示进度条
+            batch_size: 批量大小，None 使用默认值
             
         Returns:
             嵌入向量数组
@@ -529,10 +722,22 @@ class EmbeddingModel:
         if isinstance(texts, str):
             texts = [texts]
         
-        embeddings = self._model.encode(
-            texts,
-            show_progress_bar=show_progress_bar,
-        )
+        batch_size = batch_size or self._batch_size
+        
+        if self._use_mock:
+            embeddings = self._model.encode(
+                texts,
+                show_progress_bar=show_progress_bar,
+            )
+        else:
+            # 使用批量处理加速
+            embeddings = self._model.encode(
+                texts,
+                show_progress_bar=show_progress_bar,
+                batch_size=batch_size,
+                convert_to_numpy=True,
+                normalize_embeddings=True,  # 预先归一化提升检索性能
+            )
         
         return embeddings
     
@@ -543,6 +748,7 @@ class EmbeddingModel:
             return self._model.embedding_dim
         else:
             return self._model.get_sentence_embedding_dimension()
+
 
 
 # ============================================================================
@@ -715,6 +921,8 @@ class DocumentIngestor:
         self.embedding_model = EmbeddingModel(
             model_name=self.config.embedding_model,
             use_mock=use_mock,
+            device=self.config.device,
+            batch_size=self.config.batch_size,
         )
         
         self.vector_store = VectorStore(
@@ -723,7 +931,11 @@ class DocumentIngestor:
             use_mock=use_mock,
         )
         
-        logger.info("文档摄入器初始化完成")
+        logger.info(
+            f"文档摄入器初始化完成 | "
+            f"设备: {self.embedding_model._device} | "
+            f"批量大小: {self.config.batch_size}"
+        )
     
     def ingest_file(self, file_path: Union[str, Path]) -> int:
         """

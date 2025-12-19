@@ -33,6 +33,17 @@ logger = logging.getLogger(__name__)
 TORCH_AVAILABLE = False
 TRANSFORMERS_AVAILABLE = False
 BNB_AVAILABLE = False
+OPENAI_AVAILABLE = False
+
+try:
+    from openai import OpenAI
+    OPENAI_AVAILABLE = True
+    logger.info("OpenAI client 已导入")
+except ImportError as e:
+    import sys
+    logger.warning(f"OpenAI 未安装: {e}")
+    logger.warning(f"Python Executable: {sys.executable}")
+    OpenAI = None
 
 try:
     import torch
@@ -73,6 +84,33 @@ except ImportError:
 # 配置数据类
 # ============================================================================
 
+# 导入全局配置
+try:
+    from config.settings import config as global_config, get_device, get_device_id
+    SETTINGS_AVAILABLE = True
+except ImportError:
+    global_config = None
+    get_device = lambda: "cpu"
+    get_device_id = lambda: None
+    SETTINGS_AVAILABLE = False
+    logger.warning("无法导入 config.settings，使用默认配置")
+
+# 获取默认值
+def _get_llm_model_name():
+    if SETTINGS_AVAILABLE and global_config:
+        return global_config.qwen_llm.model_name
+    return "/home/tanxk/xiaoke/Qwen2.5-7B-Instruct"
+
+def _get_llm_device():
+    if SETTINGS_AVAILABLE:
+        return get_device()
+    return "cpu"
+
+def _get_llm_device_id():
+    if SETTINGS_AVAILABLE:
+        return get_device_id()
+    return None
+
 @dataclass
 class QwenLLMConfig:
     """
@@ -81,7 +119,6 @@ class QwenLLMConfig:
     Attributes:
         model_name: 模型名称/路径
         device: 运行设备 ('cuda', 'cpu', 'auto')
-        use_4bit: 是否使用 4-bit 量化
         max_new_tokens: 最大生成 token 数
         temperature: 生成温度
         top_p: Top-p 采样
@@ -89,15 +126,21 @@ class QwenLLMConfig:
         repetition_penalty: 重复惩罚
         do_sample: 是否采样
     """
-    model_name: str = "Qwen/Qwen2.5-7B-Instruct"
-    device: str = "auto"
-    use_4bit: bool = True
+    model_name: str = None
+    device: str = None
     max_new_tokens: int = 2048
     temperature: float = 0.7
     top_p: float = 0.9
     top_k: int = 50
     repetition_penalty: float = 1.1
     do_sample: bool = True
+    
+    def __post_init__(self):
+        # 从 settings 读取默认值
+        if self.model_name is None:
+            self.model_name = _get_llm_model_name()
+        if self.device is None:
+            self.device = _get_llm_device()
 
 
 # ============================================================================
@@ -288,27 +331,26 @@ class QwenLLM:
         self.load_model()
     
     def load_model(self):
-        """加载 Qwen 模型"""
+        """加载 Qwen 模型 (Vanilla 模式 - 无优化)"""
         logger.info(f"加载模型: {self.config.model_name}")
         
-        # 确定设备
-        if self.config.device == "auto":
-            self._device = "cuda" if torch.cuda.is_available() else "cpu"
-        else:
-            self._device = self.config.device
+        # 获取目标设备串
+        device_str = _get_llm_device()
+        self._device = device_str
         
-        logger.info(f"运行设备: {self._device}")
+        # 处理多卡情况 (device_id: 5,6)
+        is_multi_gpu = False
+        if self._device == "auto":
+            device_id = _get_llm_device_id()
+            if device_id and (isinstance(device_id, (str, list))):
+                device_id_str = str(device_id) if isinstance(device_id, str) else ",".join(map(str, device_id))
+                if ',' in device_id_str or '-' in device_id_str:
+                    is_multi_gpu = True
+                    # 注意：如果 torch 已经初始化，环境设置可能无效
+                    os.environ["CUDA_VISIBLE_DEVICES"] = device_id_str
+                    logger.info(f"检测到多卡配置: {device_id_str}, 设置 CUDA_VISIBLE_DEVICES")
         
-        # 配置量化
-        quantization_config = None
-        if self.config.use_4bit and self._device == "cuda" and BNB_AVAILABLE:
-            quantization_config = BitsAndBytesConfig(
-                load_in_4bit=True,
-                bnb_4bit_quant_type="nf4",
-                bnb_4bit_compute_dtype=torch.float16,
-                bnb_4bit_use_double_quant=True,
-            )
-            logger.info("启用 4-bit 量化")
+        logger.info(f"目标设备策略: {self._device}")
         
         # 加载 tokenizer
         self.tokenizer = AutoTokenizer.from_pretrained(
@@ -319,22 +361,51 @@ class QwenLLM:
         # 模型加载参数
         model_kwargs = {
             "trust_remote_code": True,
-            "torch_dtype": torch.float16 if self._device == "cuda" else torch.float32,
         }
         
-        if quantization_config:
-            model_kwargs["quantization_config"] = quantization_config
-            model_kwargs["device_map"] = "auto"
-        else:
-            model_kwargs["device_map"] = self._device
-        
         # 加载模型
-        self.model = AutoModelForCausalLM.from_pretrained(
-            self.config.model_name,
-            **model_kwargs,
-        )
-        
-        logger.info("模型加载完成")
+        logger.info(f"开始加载 LLM (Device Strategy: {self._device})...")
+        try:
+            self.model = AutoModelForCausalLM.from_pretrained(
+                self.config.model_name,
+                **model_kwargs,
+            )
+            
+            # 手动移动到设备 (如果不是 auto 模式)
+            if self._device != "auto":
+                self.model.to(self._device)
+                
+            logger.info("LLM 模型加载完成")
+        except Exception as e:
+            logger.error(f"模型加载失败: {e}")
+            raise
+    
+    def _get_best_gpu(self) -> int:
+        """选择显存最多的 GPU"""
+        try:
+            import subprocess
+            result = subprocess.run(
+                ['nvidia-smi', '--query-gpu=index,memory.free', '--format=csv,nounits,noheader'],
+                capture_output=True, text=True, timeout=5
+            )
+            
+            if result.returncode == 0:
+                best_gpu = 0
+                max_free = 0
+                
+                for line in result.stdout.strip().split('\n'):
+                    parts = line.split(',')
+                    if len(parts) >= 2:
+                        gpu_idx = int(parts[0].strip())
+                        free_mb = int(parts[1].strip())
+                        if free_mb > max_free:
+                            max_free = free_mb
+                            best_gpu = gpu_idx
+                
+                return best_gpu
+        except Exception:
+            pass
+        return 0
     
     def generate(
         self,
@@ -370,7 +441,7 @@ class QwenLLM:
         inputs = self.tokenizer(
             text,
             return_tensors="pt",
-        ).to(self._device)
+        ).to(self.model.device)
         
         # 生成参数
         gen_kwargs = {
@@ -432,7 +503,7 @@ class QwenLLM:
             add_generation_prompt=True,
         )
         
-        inputs = self.tokenizer(text, return_tensors="pt").to(self._device)
+        inputs = self.tokenizer(text, return_tensors="pt").to(self.model.device)
         
         # 创建流式输出器
         streamer = TextIteratorStreamer(
@@ -479,6 +550,127 @@ class QwenLLM:
 
 
 # ============================================================================
+# Qwen LLM API 模型封装
+# ============================================================================
+
+class QwenLLMAPIModel:
+    """
+    Qwen LLM API 模型封装
+    
+    使用 OpenAI 兼容的 API 进行文本生成。
+    """
+    
+    def __init__(self, config: QwenLLMConfig = None):
+        """
+        初始化 Qwen LLM API 模型
+        
+        Args:
+            config: 模型配置（未使用，从全局配置读取API设置）
+        """
+        self.config = config or QwenLLMConfig()
+        
+        if not OPENAI_AVAILABLE:
+            raise ImportError("需要安装 openai 库: pip install openai")
+        
+        # 从全局配置读取 API 设置
+        if global_config:
+            api_base_url = global_config.qwen_llm.api_base_url
+            api_key = global_config.qwen_llm.api_key
+            self.model_name = global_config.qwen_llm.model_name
+            self.max_tokens = global_config.qwen_llm.max_tokens
+            self.temperature = global_config.qwen_llm.temperature
+        else:
+            raise ValueError("无法获取全局配置")
+        
+        if not api_base_url or not api_key:
+            raise ValueError("请在 config.yaml 中配置 qwen_llm 的 api_base_url 和 api_key")
+        
+        # 初始化 OpenAI 客户端
+        self.client = OpenAI(
+            base_url=api_base_url,
+            api_key=api_key,
+        )
+        
+        logger.info(f"Qwen LLM API 模型已初始化 | Model: {self.model_name}")
+    
+    def generate(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        **kwargs,
+    ) -> str:
+        """
+        生成文本响应
+        
+        Args:
+            prompt: 用户提示
+            system_prompt: 系统提示
+            **kwargs: 覆盖生成参数
+            
+        Returns:
+            生成的文本
+        """
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+        
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model_name,
+                messages=messages,
+                max_tokens=kwargs.get("max_tokens", self.max_tokens),
+                temperature=kwargs.get("temperature", self.temperature),
+            )
+            
+            return response.choices[0].message.content
+        except Exception as e:
+            logger.error(f"LLM API 调用失败: {e}")
+            raise
+    
+    def generate_stream(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        **kwargs,
+    ) -> Generator[str, None, None]:
+        """
+        流式生成文本
+        
+        Args:
+            prompt: 用户提示
+            system_prompt: 系统提示
+            
+        Yields:
+            生成的文本片段
+        """
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+        
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model_name,
+                messages=messages,
+                max_tokens=kwargs.get("max_tokens", self.max_tokens),
+                temperature=kwargs.get("temperature", self.temperature),
+                stream=True,
+            )
+            
+            for chunk in response:
+                if chunk.choices[0].delta.content:
+                    yield chunk.choices[0].delta.content
+        except Exception as e:
+            logger.error(f"LLM API 流式调用失败: {e}")
+            raise
+    
+    def close(self):
+        """释放资源"""
+        pass
+
+
+# ============================================================================
 # LLM 引擎管理
 # ============================================================================
 
@@ -511,26 +703,42 @@ class LLMEngine:
         """
         self.config = config or QwenLLMConfig()
         self._use_mock = use_mock
+        self._use_api = False
         
         # 初始化模型
         if use_mock:
             self._llm = MockQwenLLM(self.config)
         else:
-            can_load = TRANSFORMERS_AVAILABLE and TORCH_AVAILABLE
-            
-            if can_load:
+            # 优先使用 API 模式
+            if OPENAI_AVAILABLE and global_config and global_config.qwen_llm.api_key:
                 try:
-                    self._llm = QwenLLM(self.config)
+                    self._llm = QwenLLMAPIModel(self.config)
+                    self._use_api = True
+                    logger.info("使用 Qwen LLM API 模式")
                 except Exception as e:
-                    logger.warning(f"加载 Qwen LLM 失败: {e}，回退到 Mock")
+                    logger.warning(f"加载 Qwen LLM API 失败: {e}，尝试本地模型")
+                    self._llm = None
+            else:
+                self._llm = None
+            
+            # 如果 API 模式不可用，尝试本地模型
+            if self._llm is None:
+                can_load = TRANSFORMERS_AVAILABLE and TORCH_AVAILABLE
+                
+                if can_load:
+                    try:
+                        self._llm = QwenLLM(self.config)
+                        logger.info("使用 Qwen LLM 本地模型")
+                    except Exception as e:
+                        logger.warning(f"加载 Qwen LLM 本地模型失败: {e}，回退到 Mock")
+                        self._llm = MockQwenLLM(self.config)
+                        self._use_mock = True
+                else:
+                    logger.warning("依赖不完整，使用 Mock 模式")
                     self._llm = MockQwenLLM(self.config)
                     self._use_mock = True
-            else:
-                logger.warning("依赖不完整，使用 Mock 模式")
-                self._llm = MockQwenLLM(self.config)
-                self._use_mock = True
         
-        logger.info(f"LLMEngine 初始化完成 | Mock: {self._use_mock}")
+        logger.info(f"LLMEngine 初始化完成 | Mock: {self._use_mock} | API: {self._use_api}")
     
     @classmethod
     def get_instance(cls, use_mock: bool = False) -> "LLMEngine":
@@ -654,25 +862,22 @@ class LLMEngine:
 # ============================================================================
 
 def create_llm_engine(
-    model_name: str = "Qwen/Qwen2.5-7B-Instruct",
+    model_name: str = None,
     use_mock: bool = False,
-    use_4bit: bool = True,
     **kwargs,
 ) -> LLMEngine:
     """
     创建 LLM 引擎
     
     Args:
-        model_name: 模型名称
+        model_name: 模型名称（默认从 settings.py 读取）
         use_mock: 是否使用 Mock
-        use_4bit: 是否使用 4-bit 量化
         
     Returns:
         LLMEngine 实例
     """
     config = QwenLLMConfig(
         model_name=model_name,
-        use_4bit=use_4bit,
         **kwargs,
     )
     return LLMEngine(config=config, use_mock=use_mock)

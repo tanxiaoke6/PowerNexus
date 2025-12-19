@@ -3,13 +3,12 @@
 PowerNexus - Qwen2.5-VL 视觉语言模型封装
 
 本模块提供基于 Qwen2.5-VL 的电力设备缺陷检测功能。
-支持 4-bit 量化以节省显存，CPU 模式备选。
+支持 CPU 模式备选。
 
 模型: Qwen/Qwen2.5-VL-7B-Instruct (或 Qwen2-VL-7B-Instruct)
 
 特性:
 - Qwen2.5-VL 视觉语言模型
-- 4-bit 量化 (BitsAndBytes) 降低显存需求
 - 自动 GPU/CPU 检测
 - 电力设备缺陷专用提示
 - 结构化 JSON 输出
@@ -38,8 +37,19 @@ logger = logging.getLogger(__name__)
 TORCH_AVAILABLE = False
 TRANSFORMERS_AVAILABLE = False
 QWEN_VL_UTILS_AVAILABLE = False
-BNB_AVAILABLE = False
 PIL_AVAILABLE = False
+OPENAI_AVAILABLE = False
+
+try:
+    from openai import OpenAI
+    OPENAI_AVAILABLE = True
+    logger.info("OpenAI client 已导入")
+except ImportError as e:
+    import sys
+    logger.warning(f"OpenAI 未安装: {e}")
+    logger.warning(f"Python Executable: {sys.executable}")
+    logger.warning(f"Sys Path: {sys.path}")
+    OpenAI = None
 
 try:
     import torch
@@ -52,18 +62,29 @@ except ImportError:
 try:
     from transformers import (
         AutoProcessor,
+        AutoModel,
         AutoModelForVision2Seq,
         Qwen2VLForConditionalGeneration,
-        BitsAndBytesConfig,
     )
+    # 尝试导入新版 API
+    try:
+        from transformers import AutoModelForImageTextToText
+    except ImportError:
+        AutoModelForImageTextToText = None
+        
     TRANSFORMERS_AVAILABLE = True
     logger.info("Transformers 已导入")
+    
+    # 尝试导入 transformers  (用户示例中使用)
+    try:
+        from transformers  import Qwen2_5_VLForConditionalGeneration
+    except ImportError:
+        Qwen2_5_VLForConditionalGeneration = None
 except ImportError:
     logger.warning("Transformers 未安装")
     AutoProcessor = None
     AutoModelForVision2Seq = None
     Qwen2VLForConditionalGeneration = None
-    BitsAndBytesConfig = None
 
 try:
     from qwen_vl_utils import process_vision_info
@@ -73,13 +94,6 @@ except ImportError:
     logger.warning("qwen_vl_utils 未安装，将使用内置处理")
     process_vision_info = None
 
-try:
-    import bitsandbytes as bnb
-    BNB_AVAILABLE = True
-    logger.info("BitsAndBytes 已导入")
-except ImportError:
-    logger.warning("BitsAndBytes 未安装，无法使用 4-bit 量化")
-    bnb = None
 
 try:
     from PIL import Image
@@ -93,6 +107,38 @@ except ImportError:
 # 配置数据类
 # ============================================================================
 
+# 导入全局配置
+try:
+    from config.settings import config as global_config, get_device, get_device_id
+    SETTINGS_AVAILABLE = True
+except ImportError:
+    global_config = None
+    get_device = lambda: "cpu"
+    get_device_id = lambda: None
+    SETTINGS_AVAILABLE = False
+    logger.warning("无法导入 config.settings，使用默认配置")
+
+# 获取默认值
+def _get_vl_model_name():
+    if SETTINGS_AVAILABLE and global_config:
+        return global_config.qwen_vl.model_name
+    return "/home/tanxk/xiaoke/Qwen2.5-VL-7B-Instruct"
+
+def _get_vl_device():
+    if SETTINGS_AVAILABLE:
+        return get_device()
+    return "cpu"
+
+def _get_vl_device_id():
+    if SETTINGS_AVAILABLE:
+        return get_device_id()
+    return None
+
+def _get_vl_use_flash_attention():
+    if SETTINGS_AVAILABLE and global_config:
+        return global_config.qwen_vl.use_flash_attention
+    return False
+
 @dataclass
 class QwenVLConfig:
     """
@@ -101,21 +147,26 @@ class QwenVLConfig:
     Attributes:
         model_name: 模型名称/路径
         device: 运行设备 ('cuda', 'cpu', 'auto')
-        use_4bit: 是否使用 4-bit 量化
         use_flash_attention: 是否使用 Flash Attention
         max_new_tokens: 最大生成 token 数
         temperature: 生成温度
         top_p: Top-p 采样
         trust_remote_code: 是否信任远程代码
     """
-    model_name: str = "Qwen/Qwen2.5-VL-7B-Instruct"
-    device: str = "auto"
-    use_4bit: bool = True
+    model_name: str = None
+    device: str = None
     use_flash_attention: bool = True
     max_new_tokens: int = 1024
     temperature: float = 0.2
     top_p: float = 0.9
     trust_remote_code: bool = True
+    
+    def __post_init__(self):
+        # 从 settings 读取默认值
+        if self.model_name is None:
+            self.model_name = _get_vl_model_name()
+        if self.device is None:
+            self.device = _get_vl_device()
 
 
 @dataclass
@@ -300,7 +351,7 @@ class Qwen2VLModel:
     """
     Qwen2.5-VL 视觉语言模型封装
     
-    支持 4-bit 量化和 Flash Attention。
+    支持 Flash Attention。
     """
     
     def __init__(self, config: QwenVLConfig):
@@ -328,30 +379,25 @@ class Qwen2VLModel:
     
     def load_model(self):
         """
-        加载 Qwen2.5-VL 模型
-        
-        支持 4-bit 量化以节省显存。
+        加载 Qwen2.5-VL 模型 (Vanilla 模式 - 无优化)
         """
         logger.info(f"加载模型: {self.config.model_name}")
         
-        # 确定设备
-        if self.config.device == "auto":
-            self._device = "cuda" if torch.cuda.is_available() else "cpu"
-        else:
-            self._device = self.config.device
+        # 获取目标设备串
+        device_str = _get_vl_device()
+        self._device = device_str
         
-        logger.info(f"运行设备: {self._device}")
+        # 处理多卡情况 (device_id: 5,6)
+        if self._device == "auto":
+            device_id = _get_vl_device_id()
+            if device_id and (isinstance(device_id, (str, list))):
+                device_id_str = str(device_id) if isinstance(device_id, str) else ",".join(map(str, device_id))
+                if ',' in device_id_str or '-' in device_id_str:
+                    # 注意：如果 torch 已经初始化，环境设置可能无效
+                    os.environ["CUDA_VISIBLE_DEVICES"] = device_id_str
+                    logger.info(f"检测到多卡配置: {device_id_str}, 设置 CUDA_VISIBLE_DEVICES")
         
-        # 配置量化
-        quantization_config = None
-        if self.config.use_4bit and self._device == "cuda" and BNB_AVAILABLE:
-            quantization_config = BitsAndBytesConfig(
-                load_in_4bit=True,
-                bnb_4bit_quant_type="nf4",
-                bnb_4bit_compute_dtype=torch.float16,
-                bnb_4bit_use_double_quant=True,
-            )
-            logger.info("启用 4-bit 量化")
+        logger.info(f"目标设备策略: {self._device}")
         
         # 加载处理器
         self.processor = AutoProcessor.from_pretrained(
@@ -360,41 +406,72 @@ class Qwen2VLModel:
         )
         
         # 模型加载参数
+        # 基础模型加载参数，仅包含必要的 trust_remote_code        # 模型加载参数
         model_kwargs = {
-            "trust_remote_code": self.config.trust_remote_code,
-            "torch_dtype": torch.float16 if self._device == "cuda" else torch.float32,
+            "trust_remote_code": True,
         }
         
-        if quantization_config:
-            model_kwargs["quantization_config"] = quantization_config
-            model_kwargs["device_map"] = "auto"
-        else:
-            model_kwargs["device_map"] = self._device
+        # 尝试加载模型
+        logger.info(f"开始加载 VL 模型 (Direct to {self._device})...")
         
-        # 尝试使用 Flash Attention
-        if self.config.use_flash_attention and self._device == "cuda":
-            try:
-                model_kwargs["attn_implementation"] = "flash_attention_2"
-                logger.info("启用 Flash Attention 2")
-            except Exception as e:
-                logger.warning(f"Flash Attention 不可用: {e}")
-        
-        # 加载模型
         try:
-            # 尝试使用 Qwen2VL 专用类
-            self.model = Qwen2VLForConditionalGeneration.from_pretrained(
-                self.config.model_name,
-                **model_kwargs,
-            )
+            # 使用 Qwen2_5_VLForConditionalGeneration (支持 generate 方法)
+            if Qwen2_5_VLForConditionalGeneration is not None:
+                logger.info("使用 Qwen2_5_VLForConditionalGeneration")
+                self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+                    self.config.model_name,
+                    **model_kwargs,
+                )
+                # 将模型移动到目标设备（除非是 auto 模式）
+                if self._device != "auto":
+                    self.model.to(self._device)
+            elif AutoModelForImageTextToText is not None:
+                logger.info("使用 AutoModelForImageTextToText")
+                self.model = AutoModelForImageTextToText.from_pretrained(
+                    self.config.model_name,
+                    **model_kwargs,
+                )
+            else:
+                logger.info("使用 AutoModelForVision2Seq")
+                self.model = AutoModelForVision2Seq.from_pretrained(
+                    self.config.model_name,
+                    **model_kwargs,
+                )
+                # 将模型移动到目标设备（除非是 auto 模式）
+                if self._device != "auto":
+                    self.model.to(self._device)
+                
+            logger.info("VL 模型加载完成")
         except Exception as e:
-            logger.warning(f"Qwen2VLForConditionalGeneration 加载失败: {e}")
-            # 回退到通用类
-            self.model = AutoModelForVision2Seq.from_pretrained(
-                self.config.model_name,
-                **model_kwargs,
+            logger.error(f"VL 模型加载失败: {e}")
+            raise
+    
+    def _get_best_gpu(self) -> int:
+        """选择显存最多的 GPU"""
+        try:
+            import subprocess
+            result = subprocess.run(
+                ['nvidia-smi', '--query-gpu=index,memory.free', '--format=csv,nounits,noheader'],
+                capture_output=True, text=True, timeout=5
             )
-        
-        logger.info("模型加载完成")
+            
+            if result.returncode == 0:
+                best_gpu = 0
+                max_free = 0
+                
+                for line in result.stdout.strip().split('\n'):
+                    parts = line.split(',')
+                    if len(parts) >= 2:
+                        gpu_idx = int(parts[0].strip())
+                        free_mb = int(parts[1].strip())
+                        if free_mb > max_free:
+                            max_free = free_mb
+                            best_gpu = gpu_idx
+                
+                return best_gpu
+        except Exception:
+            pass
+        return 0
     
     def _prepare_image(self, image_path: str) -> Image.Image:
         """
@@ -465,7 +542,7 @@ class Qwen2VLModel:
                 videos=video_inputs,
                 padding=True,
                 return_tensors="pt",
-            ).to(self._device)
+            ).to(self.model.device)
         else:
             # 简化处理
             text = self.processor.apply_chat_template(
@@ -478,7 +555,7 @@ class Qwen2VLModel:
                 text=text,
                 images=image,
                 return_tensors="pt",
-            ).to(self._device)
+            ).to(self.model.device)
         
         # 生成响应
         with torch.no_grad():
@@ -518,6 +595,134 @@ class Qwen2VLModel:
 
 
 # ============================================================================
+# Qwen2.5-VL API 模型封装
+# ============================================================================
+
+class Qwen2VLAPIModel:
+    """
+    Qwen2.5-VL API 模型封装
+    
+    使用 OpenAI 兼容的 API 进行图像分析。
+    """
+    
+    def __init__(self, config: QwenVLConfig = None):
+        """
+        初始化 Qwen2.5-VL API 模型
+        
+        Args:
+            config: 模型配置（未使用，从全局配置读取API设置）
+        """
+        self.config = config or QwenVLConfig()
+        
+        if not OPENAI_AVAILABLE:
+            raise ImportError("需要安装 openai 库: pip install openai")
+        
+        # 从全局配置读取 API 设置
+        if global_config:
+            api_base_url = global_config.qwen_vl.api_base_url
+            api_key = global_config.qwen_vl.api_key
+            self.model_name = global_config.qwen_vl.model_name
+            self.max_tokens = global_config.qwen_vl.max_tokens
+            self.temperature = global_config.qwen_vl.temperature
+        else:
+            raise ValueError("无法获取全局配置")
+        
+        if not api_base_url or not api_key:
+            raise ValueError("请在 config.yaml 中配置 qwen_vl 的 api_base_url 和 api_key")
+        
+        # 初始化 OpenAI 客户端
+        self.client = OpenAI(
+            base_url=api_base_url,
+            api_key=api_key,
+        )
+        
+        logger.info(f"Qwen2.5-VL API 模型已初始化 | Model: {self.model_name}")
+    
+    def _encode_image(self, image_path: str) -> str:
+        """将图像编码为 base64"""
+        with open(image_path, "rb") as f:
+            return base64.b64encode(f.read()).decode("utf-8")
+    
+    def _get_image_mime_type(self, image_path: str) -> str:
+        """获取图像 MIME 类型"""
+        ext = Path(image_path).suffix.lower()
+        mime_types = {
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".png": "image/png",
+            ".gif": "image/gif",
+            ".webp": "image/webp",
+        }
+        return mime_types.get(ext, "image/jpeg")
+    
+    def analyze_image(
+        self,
+        image_path: str,
+        prompt: str = None,
+    ) -> str:
+        """
+        分析图像并返回结果
+        
+        Args:
+            image_path: 图像路径
+            prompt: 自定义提示（可选）
+            
+        Returns:
+            模型响应文本
+        """
+        if not os.path.exists(image_path):
+            raise FileNotFoundError(f"图像文件不存在: {image_path}")
+        
+        if prompt is None:
+            prompt = QwenVLPrompts.DEFECT_DETECTION_PROMPT
+        
+        # 编码图像
+        image_base64 = self._encode_image(image_path)
+        mime_type = self._get_image_mime_type(image_path)
+        
+        # 构建消息
+        messages = [
+            {
+                "role": "system",
+                "content": QwenVLPrompts.SYSTEM_PROMPT,
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:{mime_type};base64,{image_base64}"
+                        }
+                    },
+                    {
+                        "type": "text",
+                        "text": prompt
+                    }
+                ]
+            }
+        ]
+        
+        # 调用 API
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model_name,
+                messages=messages,
+                max_tokens=self.max_tokens,
+                temperature=self.temperature,
+            )
+            
+            return response.choices[0].message.content
+        except Exception as e:
+            logger.error(f"VL API 调用失败: {e}")
+            raise
+    
+    def close(self):
+        """释放资源"""
+        pass
+
+
+# ============================================================================
 # 缺陷检测器主类
 # ============================================================================
 
@@ -546,33 +751,66 @@ class DefectDetector:
             config: 模型配置
             use_mock: 是否使用 Mock 模式
         """
+        global OPENAI_AVAILABLE  # Fix UnboundLocalError
+        
         self.config = config or QwenVLConfig()
         self._use_mock = use_mock
+        self._use_api = False
         
         # 初始化模型
         if use_mock:
             self._model = MockQwenVL(self.config)
         else:
-            # 检查是否可以加载真实模型
-            can_load = (
-                TRANSFORMERS_AVAILABLE and 
-                TORCH_AVAILABLE and 
-                PIL_AVAILABLE
-            )
+            # 优先使用 API 模式
+            # 检查 API Key 是否存在 (非空字符串)
+            use_api = False
+            if global_config and global_config.qwen_vl.api_key:
+                use_api = True
             
-            if can_load:
-                try:
-                    self._model = Qwen2VLModel(self.config)
-                except Exception as e:
-                    logger.warning(f"加载 Qwen-VL 失败: {e}，回退到 Mock 模式")
+            # 强制尝试 API 模式
+            if use_api:
+                if not OPENAI_AVAILABLE:
+                    logger.warning("虽然配置了 API Key，但 OpenAI 库不可用，尝试导入...")
+                    try:
+                        import openai
+                        OPENAI_AVAILABLE = True
+                    except ImportError:
+                        logger.error("OpenAI 导入失败，无法使用 API 模式")
+                        use_api = False
+                
+                if use_api:
+                    try:
+                        self._model = Qwen2VLAPIModel(self.config)
+                        self._use_api = True
+                        logger.info("使用 Qwen-VL API 模式")
+                    except Exception as e:
+                        logger.warning(f"加载 Qwen-VL API 失败: {e}，将尝试本地模型")
+                        self._model = None
+            else:
+                self._model = None
+            
+            # 如果 API 模式不可用，尝试本地模型
+            if self._model is None:
+                can_load = (
+                    TRANSFORMERS_AVAILABLE and 
+                    TORCH_AVAILABLE and 
+                    PIL_AVAILABLE
+                )
+                
+                if can_load:
+                    try:
+                        self._model = Qwen2VLModel(self.config)
+                        logger.info("使用 Qwen-VL 本地模型")
+                    except Exception as e:
+                        logger.warning(f"加载 Qwen-VL 本地模型失败: {e}，回退到 Mock 模式")
+                        self._model = MockQwenVL(self.config)
+                        self._use_mock = True
+                else:
+                    logger.warning("依赖不完整，使用 Mock 模式")
                     self._model = MockQwenVL(self.config)
                     self._use_mock = True
-            else:
-                logger.warning("依赖不完整，使用 Mock 模式")
-                self._model = MockQwenVL(self.config)
-                self._use_mock = True
         
-        logger.info(f"DefectDetector 初始化完成 | Mock: {self._use_mock}")
+        logger.info(f"DefectDetector 初始化完成 | Mock: {self._use_mock} | API: {self._use_api}")
     
     def _parse_response(self, response: str) -> DefectDetectionResult:
         """
@@ -726,18 +964,16 @@ class DefectDetector:
 # ============================================================================
 
 def create_detector(
-    model_name: str = "Qwen/Qwen2.5-VL-7B-Instruct",
+    model_name: str = None,
     use_mock: bool = False,
-    use_4bit: bool = True,
     **kwargs,
 ) -> DefectDetector:
     """
     创建缺陷检测器
     
     Args:
-        model_name: 模型名称
+        model_name: 模型名称（默认从 settings.py 读取）
         use_mock: 是否使用 Mock 模式
-        use_4bit: 是否使用 4-bit 量化
         **kwargs: 其他配置参数
         
     Returns:
@@ -745,7 +981,6 @@ def create_detector(
     """
     config = QwenVLConfig(
         model_name=model_name,
-        use_4bit=use_4bit,
         **kwargs,
     )
     return DefectDetector(config=config, use_mock=use_mock)

@@ -137,14 +137,34 @@ class MockGrid2OpEnv:
     
     当 Grid2Op 未安装时提供基本的仿真功能，
     用于开发测试和代码验证。
+    
+    支持两种模式：
+    1. 随机模式：随机生成电网状态（默认）
+    2. 数据加载模式：从预生成的文件中读取状态
+    
+    Example:
+        # 随机模式
+        >>> env = MockGrid2OpEnv()
+        
+        # 数据加载模式
+        >>> env = MockGrid2OpEnv(data_path="data/grid_states.npz")
+        >>> obs = env.reset()  # 从文件中读取第一个状态
     """
     
-    def __init__(self, env_name: str = "l2rpn_case14_sandbox"):
+    def __init__(
+        self,
+        env_name: str = "l2rpn_case14_sandbox",
+        data_path: Optional[str] = None,
+        cycle_data: bool = True,
+    ):
         """
         初始化 Mock 环境
         
         Args:
             env_name: 环境名称（用于日志）
+            data_path: 预生成状态数据文件路径 (支持 .npz 或 .json)
+                      如果提供，则从文件中读取状态而非随机生成
+            cycle_data: 当数据用完后是否循环使用 (仅在 data_path 模式下有效)
         """
         self.env_name = env_name
         self._current_step = 0
@@ -157,13 +177,179 @@ class MockGrid2OpEnv:
         self.n_sub = 14        # 变电站数量
         self.dim_topo = 57     # 拓扑向量维度
         
+        # 数据加载模式相关参数
+        self._data_path = data_path
+        self._cycle_data = cycle_data
+        self._loaded_states = None      # 加载的状态数据
+        self._state_index = 0           # 当前状态索引
+        self._use_loaded_data = False   # 是否使用加载的数据
+        
+        # 如果提供了数据路径，则加载数据
+        if data_path is not None:
+            self.load_data(data_path)
+        
         # 初始化状态
         self._init_state()
         
-        logger.info(f"Mock 环境已初始化: {env_name}")
+        mode_str = "数据加载模式" if self._use_loaded_data else "随机模式"
+        logger.info(f"Mock 环境已初始化: {env_name} ({mode_str})")
+    
+    def load_data(self, data_path: str) -> bool:
+        """
+        从文件加载预生成的电网状态数据
+        
+        支持两种格式：
+        - NPZ 格式 (.npz)：使用 numpy.savez 保存的数据
+        - JSON 格式 (.json)：JSON 格式的状态数据
+        
+        Args:
+            data_path: 数据文件路径
+            
+        Returns:
+            是否加载成功
+        """
+        import os
+        
+        if not os.path.exists(data_path):
+            logger.warning(f"数据文件不存在: {data_path}，将使用随机模式")
+            return False
+        
+        try:
+            if data_path.endswith('.npz'):
+                # 加载 NPZ 格式
+                self._loaded_states = self._load_from_npz(data_path)
+            elif data_path.endswith('.json'):
+                # 加载 JSON 格式
+                self._loaded_states = self._load_from_json(data_path)
+            else:
+                logger.warning(f"不支持的文件格式: {data_path}，将使用随机模式")
+                return False
+            
+            self._use_loaded_data = True
+            self._state_index = 0
+            
+            logger.info(
+                f"成功加载 {len(self._loaded_states)} 个预生成状态 "
+                f"(来自 {data_path})"
+            )
+            return True
+            
+        except Exception as e:
+            logger.error(f"加载数据失败: {e}，将使用随机模式")
+            self._use_loaded_data = False
+            return False
+    
+    def _load_from_npz(self, filepath: str) -> List[Dict]:
+        """
+        从 NPZ 文件加载状态数据
+        
+        Args:
+            filepath: NPZ 文件路径
+            
+        Returns:
+            状态字典列表
+        """
+        data = np.load(filepath, allow_pickle=True)
+        n_samples = int(data['n_samples'])
+        
+        states = []
+        for i in range(n_samples):
+            state = {
+                'rho': data['rho'][i].astype(np.float32),
+                'gen_p': data['gen_p'][i].astype(np.float32),
+                'gen_v': data['gen_v'][i].astype(np.float32),
+                'load_p': data['load_p'][i].astype(np.float32),
+                'load_q': data['load_q'][i].astype(np.float32),
+                'topo_vect': data['topo_vect'][i].astype(np.int32),
+            }
+            states.append(state)
+        
+        return states
+    
+    def _load_from_json(self, filepath: str) -> List[Dict]:
+        """
+        从 JSON 文件加载状态数据
+        
+        Args:
+            filepath: JSON 文件路径
+            
+        Returns:
+            状态字典列表
+        """
+        import json
+        
+        with open(filepath, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        states = []
+        for s in data['states']:
+            state = {
+                'rho': np.array(s['rho'], dtype=np.float32),
+                'gen_p': np.array(s['gen_p'], dtype=np.float32),
+                'gen_v': np.array(s['gen_v'], dtype=np.float32),
+                'load_p': np.array(s['load_p'], dtype=np.float32),
+                'load_q': np.array(s['load_q'], dtype=np.float32),
+                'topo_vect': np.array(s['topo_vect'], dtype=np.int32),
+            }
+            states.append(state)
+        
+        return states
+    
+    def _get_next_loaded_state(self) -> Optional[Dict]:
+        """
+        获取下一个预加载的状态
+        
+        Returns:
+            状态字典，如果没有更多数据且不循环则返回 None
+        """
+        if not self._use_loaded_data or self._loaded_states is None:
+            return None
+        
+        if self._state_index >= len(self._loaded_states):
+            if self._cycle_data:
+                # 循环使用数据
+                self._state_index = 0
+                logger.debug("预加载数据已用完，从头循环")
+            else:
+                logger.warning("预加载数据已用完，切换到随机模式")
+                self._use_loaded_data = False
+                return None
+        
+        state = self._loaded_states[self._state_index]
+        self._state_index += 1
+        return state
+    
+    def _apply_state(self, state: Dict):
+        """
+        应用状态字典到环境
+        
+        Args:
+            state: 状态字典
+        """
+        self.rho = state['rho'].copy()
+        self.gen_p = state['gen_p'].copy()
+        self.gen_v = state['gen_v'].copy()
+        self.load_p = state['load_p'].copy()
+        self.load_q = state['load_q'].copy()
+        self.topo_vect = state['topo_vect'].copy()
     
     def _init_state(self):
         """初始化环境状态"""
+        # 尝试从预加载数据获取状态
+        loaded_state = self._get_next_loaded_state()
+        
+        if loaded_state is not None:
+            # 使用预加载的状态
+            self._apply_state(loaded_state)
+        else:
+            # 随机生成状态
+            self._random_init_state()
+        
+        # 电网存活标志
+        self._is_done = False
+    
+    def _random_init_state(self):
+        """随机初始化环境状态（原始行为）"""
         # 随机初始化线路负载率 (0.3 - 0.8)
         self.rho = np.random.uniform(0.3, 0.8, self.n_line).astype(np.float32)
         
@@ -179,13 +365,12 @@ class MockGrid2OpEnv:
         
         # 拓扑向量 (1 = 母线1, 2 = 母线2)
         self.topo_vect = np.ones(self.dim_topo, dtype=np.int32)
-        
-        # 电网存活标志
-        self._is_done = False
     
     def reset(self) -> "MockObservation":
         """
         重置环境
+        
+        如果在数据加载模式下，会从预加载的数据中读取下一个状态。
         
         Returns:
             初始观测
@@ -198,6 +383,9 @@ class MockGrid2OpEnv:
         """
         执行动作
         
+        在数据加载模式下，会切换到预加载的下一个状态。
+        在随机模式下，会随机演化状态。
+        
         Args:
             action: 动作（在 Mock 中忽略具体内容）
             
@@ -206,14 +394,15 @@ class MockGrid2OpEnv:
         """
         self._current_step += 1
         
-        # 模拟负荷波动
-        self.load_p *= np.random.uniform(0.98, 1.02, self.n_load)
+        # 尝试从预加载数据获取下一个状态
+        loaded_state = self._get_next_loaded_state()
         
-        # 更新线路负载率
-        self.rho = np.clip(
-            self.rho + np.random.uniform(-0.05, 0.05, self.n_line),
-            0.1, 1.5
-        ).astype(np.float32)
+        if loaded_state is not None:
+            # 使用预加载的状态
+            self._apply_state(loaded_state)
+        else:
+            # 随机演化状态
+            self._random_evolve_state()
         
         # 检查是否过载导致级联故障
         if np.any(self.rho > 1.0):
@@ -227,9 +416,24 @@ class MockGrid2OpEnv:
         reward = self._compute_reward()
         
         obs = MockObservation(self)
-        info = {"step": self._current_step}
+        info = {
+            "step": self._current_step,
+            "data_mode": "loaded" if self._use_loaded_data else "random",
+            "state_index": self._state_index,
+        }
         
         return obs, reward, self._is_done, info
+    
+    def _random_evolve_state(self):
+        """随机演化环境状态（原始 step 行为）"""
+        # 模拟负荷波动
+        self.load_p *= np.random.uniform(0.98, 1.02, self.n_load)
+        
+        # 更新线路负载率
+        self.rho = np.clip(
+            self.rho + np.random.uniform(-0.05, 0.05, self.n_line),
+            0.1, 1.5
+        ).astype(np.float32)
     
     def _compute_reward(self) -> float:
         """
@@ -262,6 +466,22 @@ class MockGrid2OpEnv:
     def get_obs(self) -> "MockObservation":
         """获取当前观测"""
         return MockObservation(self)
+    
+    def get_data_info(self) -> Dict[str, Any]:
+        """
+        获取数据加载信息
+        
+        Returns:
+            数据加载状态信息
+        """
+        return {
+            "data_path": self._data_path,
+            "use_loaded_data": self._use_loaded_data,
+            "total_states": len(self._loaded_states) if self._loaded_states else 0,
+            "current_index": self._state_index,
+            "cycle_data": self._cycle_data,
+        }
+
 
 
 class MockObservation:

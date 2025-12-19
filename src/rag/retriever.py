@@ -55,6 +55,41 @@ except ImportError:
 # 配置数据类
 # ============================================================================
 
+# 导入全局配置
+try:
+    from config.settings import config as global_config
+    SETTINGS_AVAILABLE = True
+except ImportError:
+    global_config = None
+    SETTINGS_AVAILABLE = False
+    logger.warning("无法导入 config.settings，使用默认配置")
+
+# 获取默认值
+def _get_embedding_model():
+    if SETTINGS_AVAILABLE and global_config:
+        return global_config.rag.embedding_model
+    return "/home/tanxk/xiaoke/all-MiniLM-L6-v2"
+
+def _get_collection_name():
+    if SETTINGS_AVAILABLE and global_config:
+        return global_config.rag.collection_name
+    return "power_grid_standards"
+
+def _get_persist_directory():
+    if SETTINGS_AVAILABLE and global_config:
+        return global_config.rag.persist_directory
+    return "./data/vector_db"
+
+def _get_top_k():
+    if SETTINGS_AVAILABLE and global_config:
+        return global_config.rag.top_k
+    return 5
+
+def _get_score_threshold():
+    if SETTINGS_AVAILABLE and global_config:
+        return global_config.rag.score_threshold
+    return 0.5
+
 @dataclass
 class RetrieverConfig:
     """
@@ -68,12 +103,25 @@ class RetrieverConfig:
         score_threshold: 相似度阈值 (0-1, 越低越严格)
         use_reranking: 是否使用重排序
     """
-    collection_name: str = "power_grid_standards"
-    persist_directory: str = "./data/vector_db"
-    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
-    top_k: int = 5
-    score_threshold: float = 0.5
+    collection_name: str = None
+    persist_directory: str = None
+    embedding_model: str = None
+    top_k: int = None
+    score_threshold: float = None
     use_reranking: bool = False
+    
+    def __post_init__(self):
+        # 从 settings 读取默认值
+        if self.collection_name is None:
+            self.collection_name = _get_collection_name()
+        if self.persist_directory is None:
+            self.persist_directory = _get_persist_directory()
+        if self.embedding_model is None:
+            self.embedding_model = _get_embedding_model()
+        if self.top_k is None:
+            self.top_k = _get_top_k()
+        if self.score_threshold is None:
+            self.score_threshold = _get_score_threshold()
 
 
 # ============================================================================

@@ -1,0 +1,62 @@
+# PowerNexus 配置文件
+# 修改此文件后需要重启应用
+
+# ====================
+# CUDA 设备配置
+# ====================
+cuda:
+  enabled: true
+  device_id: 6  
+  auto_select: true
+  min_free_memory_mb: 8000
+
+# ====================
+# 视觉模型 (Qwen-VL) API配置
+# ====================
+qwen_vl:
+  api_base_url: "http://localhost:8120/v1"   #8120
+  api_key: "no-key-required"
+  model_name: "Qwen2.5-VL-7B-Instruct"
+  max_tokens: 1024
+  temperature: 0.2
+
+# ====================
+# 语言模型 (Qwen-LLM) API配置
+# ====================
+qwen_llm:
+  api_base_url: "http://localhost:8120/v1"
+  api_key: "no-key-required"
+  model_name: "Qwen2.5-VL-7B-Instruct"
+  max_tokens: 2048
+  temperature: 0.7
+  use_for_text: true  # true: 文字回答用LLM, false: 文字回答用VL
+
+# ====================
+# RAG 知识库配置
+# ====================
+rag:
+  embedding_api_base_url: "http://localhost:8116/v1"   # 8116
+  embedding_api_key: "no-key-required"
+  embedding_model: "all-MiniLM-L6-v2"
+  collection_name: "power_grid_standards"
+  top_k: 5
+  score_threshold: 0.1
+  embedding_batch_size: 64
+
+# ====================
+# 强化学习 (RL) 配置
+# ====================
+rl:
+  env_name: "l2rpn_case14_sandbox"
+  learning_rate: 0.0003
+  total_timesteps: 1000000
+  ppo_device: "cpu"
+
+# ====================
+# 应用通用配置
+# ====================
+app:
+  use_mock: false
+  log_level: "INFO"
+  port: 8501
+  preload_models: false

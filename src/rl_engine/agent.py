@@ -211,9 +211,13 @@ class MockPPO:
         Returns:
             (action, state) 元组
         """
+        # 确保 observation 是扁平的
+        obs = observation.flatten() if observation.ndim > 1 else observation
+        
         # 基于观测的简单启发式策略
-        # 如果负载率高，尝试拓扑调整；否则不操作
-        rho_mean = np.mean(observation[:20])  # 假设前20维是负载率
+        # 安全地获取前 n_line 维作为负载率（处理不同维度的情况）
+        n_line = min(20, len(obs))
+        rho_mean = np.mean(obs[:n_line]) if n_line > 0 else 0.5
         
         if rho_mean > 0.8:
             # 高负载时随机选择拓扑动作
@@ -511,7 +515,24 @@ class PPO_Agent:
         Returns:
             最优动作索引
         """
-        # 确保观测是正确的形状
+        # 获取模型期望的观测维度
+        expected_dim = self.env.observation_space.shape[0]
+        actual_dim = observation.shape[-1] if observation.ndim > 0 else len(observation)
+        
+        # 处理维度不匹配
+        if actual_dim != expected_dim:
+            logger.warning(
+                f"观测维度不匹配: 实际 {actual_dim} vs 期望 {expected_dim}，进行调整"
+            )
+            if actual_dim < expected_dim:
+                # 补零
+                padding = np.zeros(expected_dim - actual_dim, dtype=observation.dtype)
+                observation = np.concatenate([observation.flatten(), padding])
+            else:
+                # 截断
+                observation = observation.flatten()[:expected_dim]
+        
+        # 确保观测是正确的形状 (1, dim) 用于 batch 预测
         if observation.ndim == 1:
             observation = observation.reshape(1, -1)
         

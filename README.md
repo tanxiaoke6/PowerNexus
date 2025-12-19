@@ -1,247 +1,422 @@
-# ⚡ PowerNexus
+# PowerNexus ⚡
 
-> **自主电网巡检与动态调度系统** - Powered by Qwen2.5
+<div align="center">
 
-[![Python 3.10+](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/)
-[![PyTorch 2.0+](https://img.shields.io/badge/PyTorch-2.0+-red.svg)](https://pytorch.org/)
-[![Streamlit](https://img.shields.io/badge/Streamlit-1.28+-FF4B4B.svg)](https://streamlit.io/)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[English](#english) | [中文](#中文)
 
----
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![PyTorch 2.0+](https://img.shields.io/badge/pytorch-2.0+-orange.svg)](https://pytorch.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
+[![Streamlit](https://img.shields.io/badge/Streamlit-1.40+-red.svg)](https://streamlit.io/)
 
-## 📖 项目概述
+**An Intelligent Power Grid Inspection and Decision System Powered by Qwen2.5**
 
-PowerNexus 是一个基于 **Qwen2.5 大模型** 的智能电网巡检与决策系统，集成了：
+<img src="docs/images/architecture.png" alt="Architecture" width="600"/>
 
-- 🔍 **Qwen2.5-VL 视觉检测** - 无人机图像缺陷识别
-- 📚 **RAG 知识库检索** - 电力技术标准智能问答
-- 🤖 **PPO 强化学习决策** - 电网拓扑优化调度
-- 🌐 **Streamlit 可视化界面** - 一站式操作仪表板
-
-### 工作流程
-
-```
-感知 (See) → 咨询 (Think) → 决策 (Decide) → 执行 (Act)
-    ↓            ↓              ↓             ↓
- Qwen-VL     ChromaDB         PPO          Report
-```
+</div>
 
 ---
 
-## 💻 硬件要求
+<a name="english"></a>
+## 🇬🇧 English
 
-| 配置 | 最低要求 | 推荐配置 |
-|------|----------|----------|
-| GPU | NVIDIA 8GB VRAM | NVIDIA 16GB+ VRAM |
-| RAM | 16 GB | 32 GB |
-| 存储 | 20 GB | 50 GB |
-| CUDA | 11.8+ | 12.1+ |
+### 📖 Overview
 
-> ⚠️ **显存说明**: 
-> - 4-bit 量化模式下，Qwen2.5-VL-7B + Qwen2.5-7B 约需 **~16GB VRAM**
-> - CPU 模式可运行但推理速度较慢
-> - Mock 模式无需 GPU，用于开发测试
+PowerNexus is an intelligent power grid inspection and decision-support system based on the **Qwen2.5** large language model family. It integrates:
 
----
+- **Qwen2.5-VL** for visual defect detection in power equipment
+- **Qwen2.5** for knowledge retrieval and natural language understanding
+- **PPO Reinforcement Learning** for grid topology optimization
+- **RAG (Retrieval-Augmented Generation)** for technical knowledge base
 
-## 🚀 快速开始
+### ✨ Features
 
-### 1. 创建环境 (推荐 Conda)
+| Module | Description |
+|--------|-------------|
+| 🔍 **Vision Analysis** | Detect defects using **Qwen2.5-VL API** and get RAG-based technical guidance |
+| 📚 **Knowledge Retrieval** | RAG-based technical Q&A with **API-based embeddings** and synthesized answers |
+| 🤖 **RL Optimization** | PPO agent with LLM-generated explanations for grid topology actions |
+| 📊 **Dashboard** | Streamlit-based interface with model status and knowledge base update tools |
 
-```bash
-# 创建 conda 环境
-conda create -n powernexus python=3.10 -y
-conda activate powernexus
-
-# 安装 PyTorch (CUDA 12.1)
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
-```
-
-### 2. 安装依赖
-
-```bash
-# 克隆项目
-git clone https://github.com/your-org/PowerNexus.git
-cd PowerNexus
-
-# 安装依赖
-pip install -r requirements.txt
-```
-
-### 3. 生成 Mock 数据
-
-```bash
-python tools/generate_mock_data.py
-```
-
-### 4. 启动 Web UI
-
-```bash
-streamlit run src/app.py
-```
-
-或使用一键启动脚本：
-
-```bash
-python start_powernexus.py
-```
-
-访问 http://localhost:8501 即可使用仪表板。
-
----
-
-## 📁 项目结构
+### 🏗️ Architecture
 
 ```
 PowerNexus/
+├── config/
+│   └── settings.py          # Global configuration (model paths, etc.)
 ├── src/
-│   ├── app.py                  # Streamlit 仪表板
-│   ├── main.py                 # 主工作流 (MainAgent)
-│   ├── perception/             # 多模态感知模块
-│   │   ├── __init__.py
-│   │   └── vision_model.py     # Qwen2.5-VL 封装
-│   ├── rag/                    # RAG 知识库模块
-│   │   ├── __init__.py
-│   │   ├── ingest.py           # 文档摄入
-│   │   └── retriever.py        # 知识检索
-│   ├── rl_engine/              # 强化学习模块
-│   │   ├── __init__.py
-│   │   ├── env_wrapper.py      # Grid2Op 环境封装
-│   │   └── agent.py            # PPO 智能体
+│   ├── app.py                # Streamlit dashboard
+│   ├── perception/           # Vision module (Qwen2.5-VL)
+│   │   └── vision_model.py
+│   ├── rag/                   # RAG module
+│   │   ├── ingest.py         # Document ingestion
+│   │   └── retriever.py      # Knowledge retrieval
+│   ├── rl_engine/            # Reinforcement Learning module
+│   │   ├── agent.py          # PPO agent
+│   │   └── env_wrapper.py    # Grid2Op environment wrapper
 │   └── utils/
-│       └── llm_engine.py       # Qwen LLM 引擎
+│       └── llm_engine.py     # Qwen LLM engine
 ├── tools/
-│   └── generate_mock_data.py   # Mock 数据生成器
+│   └── simulate_grid_state.py  # Grid state data generator
 ├── data/
-│   ├── images/                 # 巡检图像
-│   └── manuals/                # 技术标准 PDF
-├── config/                     # 配置文件
-├── models/                     # 模型权重
-├── tests/                      # 测试用例
-├── run_demo.py                 # 命令行演示
-├── start_powernexus.py         # 一键启动脚本
-├── requirements.txt            # 依赖清单
-├── .env.example                # 环境变量示例
-└── README.md                   # 本文件
+│   ├── grid_states.npz       # Pre-generated grid states
+│   └── vector_db/            # ChromaDB vector store
+└── models/
+    └── rl/                   # Saved RL models
+```
+
+### 🔄 Workflow
+
+```mermaid
+graph LR
+    A[Image Input] --> B[Qwen-VL Vision]
+    B --> C{Defect Detected?}
+    C -->|Yes| D[RAG Knowledge Query]
+    D --> E[Qwen LLM Synthesis]
+    E --> F[RL Decision]
+    F --> G[Topology Action]
+    C -->|No| H[Normal Operation]
+```
+
+1. **See**: Qwen2.5-VL analyzes power equipment images for defects
+2. **Think**: RAG retrieves relevant technical standards and guidelines
+3. **Decide**: PPO agent recommends optimal topology actions
+4. **Act**: Execute grid operations with LLM-generated explanations
+
+### 🚀 Quick Start
+
+#### Prerequisites
+
+- Python 3.10+
+- CUDA 11.8+ (for GPU acceleration)
+- 16GB+ GPU memory (recommended for 7B models)
+
+#### Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/TanXiaoke/PowerNexus.git
+cd PowerNexus
+
+# Install dependencies
+pip install -r requirements.txt
+```
+
+#### Configuration
+
+Edit `config/config.yaml` to set your API endpoints:
+
+```yaml
+qwen_vl:
+  api_base_url: "http://your-api:8120/v1"
+  api_key: "no-key-required"
+  model_name: "Qwen2.5-VL-7B-Instruct"
+
+rag:
+  embedding_api_base_url: "http://your-api:8116/v1"
+  embedding_model: "all-MiniLM-L6-v2"
+```
+
+#### Run
+
+```bash
+# Generate grid state data
+python tools/simulate_grid_state.py -n 100 -s mixed -o data/grid_states.npz
+
+# Launch Streamlit dashboard
+streamlit run src/app.py
+```
+
+#### � Document Ingestion (RAG Knowledge Base)
+
+To use the RAG knowledge retrieval feature, you need to ingest your documents (PDF, TXT, Markdown) into the vector database:
+
+```bash
+# Ingest a single PDF file
+python tools/ingest_pdf.py data/manuals/your_document.pdf
+
+# Or place documents in the manuals folder and ingest all
+python -c "
+from src.rag.ingest import DocumentIngestor, IngestConfig
+ingestor = DocumentIngestor(IngestConfig())
+ingestor.ingest_directory('data/manuals')
+"
+```
+
+**Supported formats**: `.pdf`, `.txt`, `.md`, `.markdown`
+
+> **Note**: The embedding model (`all-MiniLM-L6-v2`) may take 1-2 minutes to load on first run.
+
+### �📦 Dependencies
+
+#### Core Dependencies
+
+| Package | Version | Description |
+|---------|---------|-------------|
+| torch | ≥2.0.0 | PyTorch deep learning framework |
+| transformers | ≥4.41.0 | Hugging Face Transformers |
+| streamlit | ≥1.40.0 | Web dashboard framework |
+| stable-baselines3 | ≥2.0.0 | RL algorithms (PPO) |
+| grid2op | ≥1.12.0 | Power grid simulation |
+| gymnasium | ≥1.2.0 | RL environment interface |
+| chromadb | ≥1.3.0 | Vector database for RAG |
+| sentence-transformers | ≥5.0.0 | Text embeddings |
+| bitsandbytes | ≥0.49.0 | 4-bit quantization |
+| langchain | ≥1.0.0 | LLM application framework |
+
+#### Full Requirements
+
+```txt
+# Core ML
+torch>=2.0.0
+transformers>=4.41.0
+accelerate>=1.0.0
+bitsandbytes>=0.49.0
+sentence-transformers>=5.0.0
+
+# LLM & RAG
+langchain>=1.0.0
+chromadb>=1.3.0
+huggingface-hub>=0.20.0
+
+# Reinforcement Learning
+stable-baselines3>=2.0.0
+grid2op>=1.12.0
+gymnasium>=1.2.0
+LightSim2Grid>=0.11.0
+
+# Web Dashboard
+streamlit>=1.40.0
+altair>=5.0.0
+plotly>=5.0.0
+
+# Utilities
+numpy>=1.24.0
+pandas>=2.0.0
+Pillow>=10.0.0
+pyyaml>=6.0.0
+tqdm>=4.65.0
 ```
 
 ---
 
-## 🎮 使用指南
+<a name="中文"></a>
+## 🇨🇳 中文
 
-### Streamlit 仪表板
+### 📖 概述
 
-| Tab | 功能 | 操作 |
-|-----|------|------|
-| 🔍 视觉检测 | Qwen-VL 图像分析 | 上传图像 → 点击分析 |
-| 📚 知识检索 | RAG 问答 | 输入问题 → 获取答案 |
-| 🤖 RL 优化 | PPO 决策 | 设置负载 → 获取建议 |
-| 📊 系统信息 | 状态监控 | 查看 GPU/模块状态 |
+PowerNexus 是一个基于 **Qwen2.5** 大语言模型家族的电网智能巡检与决策支持系统，集成了：
 
-### 命令行演示
+- **Qwen2.5-VL** 用于电力设备视觉缺陷检测
+- **Qwen2.5** 用于知识检索和自然语言理解
+- **PPO 强化学习** 用于电网拓扑优化
+- **RAG（检索增强生成）** 用于技术知识库
 
-```bash
-# 交互式演示
-python run_demo.py
+### ✨ 功能特性
 
-# 直接运行工作流
-python -m src.main
+| 模块 | 描述 |
+|------|------|
+| 🔍 **视觉分析** | 使用 Qwen2.5-VL 检测电力设备缺陷（绝缘子、变压器、导线等） |
+| 📚 **知识检索** | 基于 RAG 的技术问答，配合领域知识库 |
+| 🤖 **RL 优化** | 基于 Grid2Op 环境的 PPO 智能体进行电网拓扑优化 |
+| 📊 **监控仪表板** | 基于 Streamlit 的交互式监控界面 |
+| 🔧 **数据模拟** | 生成真实的电网状态快照用于测试和训练 |
+
+### 🏗️ 项目结构
+
+```
+PowerNexus/
+├── config/
+│   └── settings.py          # 全局配置（模型路径等）
+├── src/
+│   ├── app.py                # Streamlit 仪表板
+│   ├── perception/           # 视觉模块 (Qwen2.5-VL)
+│   │   └── vision_model.py
+│   ├── rag/                   # RAG 模块
+│   │   ├── ingest.py         # 文档摄入
+│   │   └── retriever.py      # 知识检索
+│   ├── rl_engine/            # 强化学习模块
+│   │   ├── agent.py          # PPO 智能体
+│   │   └── env_wrapper.py    # Grid2Op 环境封装
+│   └── utils/
+│       └── llm_engine.py     # Qwen LLM 引擎
+├── tools/
+│   └── simulate_grid_state.py  # 电网状态数据生成器
+├── data/
+│   ├── grid_states.npz       # 预生成的电网状态
+│   └── vector_db/            # ChromaDB 向量存储
+└── models/
+    └── rl/                   # 保存的 RL 模型
 ```
 
-### Python API
+### 🔄 工作流程
+
+```mermaid
+graph LR
+    A[图像输入] --> B[Qwen-VL 视觉分析]
+    B --> C{检测到缺陷?}
+    C -->|是| D[RAG 知识查询]
+    D --> E[Qwen LLM 合成]
+    E --> F[RL 决策]
+    F --> G[拓扑操作]
+    C -->|否| H[正常运行]
+```
+
+1. **看 (See)**: Qwen2.5-VL 分析电力设备图像，检测缺陷
+2. **想 (Think)**: RAG 检索相关技术标准和指南
+3. **决 (Decide)**: PPO 智能体推荐最优拓扑动作
+4. **行 (Act)**: 执行电网操作，LLM 生成解释说明
+
+### 🚀 快速开始
+
+#### 环境要求
+
+- Python 3.10+
+- CUDA 11.8+（GPU 加速）
+- 16GB+ GPU 显存（推荐用于 7B 模型）
+
+#### 安装步骤
+
+```bash
+# 克隆仓库
+git clone https://github.com/yourusername/PowerNexus.git
+cd PowerNexus
+
+# 创建 conda 环境
+conda create -n powernexus python=3.10
+conda activate powernexus
+
+# 安装依赖
+pip install -r requirements.txt
+
+# 下载模型（可选 - 可以使用本地路径）
+# 模型: Qwen2.5-VL-7B-Instruct, Qwen2.5-7B-Instruct, all-MiniLM-L6-v2
+```
+
+#### 配置
+
+编辑 `config/settings.py` 设置本地模型路径：
 
 ```python
-from src.perception import create_detector
-from src.rag import init_knowledge_base_with_samples
-from src.rl_engine import create_ppo_agent
-
-# 缺陷检测
-detector = create_detector(use_mock=True)
-result = detector.detect("image.jpg")
-print(result.defect_type, result.severity)
-
-# 知识检索
-kb = init_knowledge_base_with_samples(use_mock=True)
-result = kb.query_and_synthesize("变压器测试要求?")
-print(result.synthesized_answer)
-
-# RL 决策
-agent = create_ppo_agent(use_mock=True)
-action = agent.predict_action(observation)
+# config/settings.py
+config.qwen_vl.model_name = "/path/to/Qwen2.5-VL-7B-Instruct"
+config.qwen_llm.model_name = "/path/to/Qwen2.5-7B-Instruct"
+config.rag.embedding_model = "/path/to/all-MiniLM-L6-v2"
 ```
 
----
-
-## ⚙️ 配置说明
-
-### 环境变量 (.env)
+#### 运行
 
 ```bash
-# Qwen 模型路径 (本地)
-QWEN_VL_MODEL_PATH=Qwen/Qwen2.5-VL-7B-Instruct
-QWEN_LLM_MODEL_PATH=Qwen/Qwen2.5-7B-Instruct
+# 生成电网状态数据
+python tools/simulate_grid_state.py -n 100 -s mixed -o data/grid_states.npz
 
-# 量化配置
-USE_4BIT_QUANTIZATION=true
-
-# 向量库路径
-VECTOR_DB_PATH=./data/vector_db
+# 启动 Streamlit 仪表板
+streamlit run src/app.py
 ```
 
-### 模型下载
+#### 📄 文档摄入（RAG 知识库）
 
-首次运行时会自动从 HuggingFace 下载模型。也可手动下载：
+要使用 RAG 知识检索功能，需要先将文档（PDF、TXT、Markdown）摄入到向量数据库：
 
 ```bash
-# 使用 huggingface-cli
-huggingface-cli download Qwen/Qwen2.5-VL-7B-Instruct
-huggingface-cli download Qwen/Qwen2.5-7B-Instruct
+# 摄入单个 PDF 文件
+python tools/ingest_pdf.py data/manuals/你的文档.pdf
+
+# 或者将文档放入 manuals 文件夹后批量摄入
+python -c "
+from src.rag.ingest import DocumentIngestor, IngestConfig
+ingestor = DocumentIngestor(IngestConfig())
+ingestor.ingest_directory('data/manuals')
+"
 ```
 
----
+**支持格式**: `.pdf`, `.txt`, `.md`, `.markdown`
 
-## 🧪 测试
+> **注意**: 嵌入模型（`all-MiniLM-L6-v2`）首次加载可能需要 1-2 分钟。
 
-```bash
-# 运行测试
-pytest tests/
+### 📦 依赖项
 
-# 模块测试
-python -m src.perception.vision_model
-python -m src.rag.retriever
-python -m src.rl_engine.agent
+#### 核心依赖
+
+| 包名 | 版本 | 描述 |
+|------|------|------|
+| torch | ≥2.0.0 | PyTorch 深度学习框架 |
+| transformers | ≥4.41.0 | Hugging Face Transformers |
+| streamlit | ≥1.40.0 | Web 仪表板框架 |
+| stable-baselines3 | ≥2.0.0 | RL 算法 (PPO) |
+| grid2op | ≥1.12.0 | 电网仿真 |
+| gymnasium | ≥1.2.0 | RL 环境接口 |
+| chromadb | ≥1.3.0 | RAG 向量数据库 |
+| sentence-transformers | ≥5.0.0 | 文本嵌入 |
+| bitsandbytes | ≥0.49.0 | 4-bit 量化 |
+| langchain | ≥1.0.0 | LLM 应用框架 |
+
+#### 完整依赖列表
+
+```txt
+# 核心 ML
+torch>=2.0.0
+transformers>=4.41.0
+accelerate>=1.0.0
+bitsandbytes>=0.49.0
+sentence-transformers>=5.0.0
+
+# LLM & RAG
+langchain>=1.0.0
+chromadb>=1.3.0
+huggingface-hub>=0.20.0
+
+# 强化学习
+stable-baselines3>=2.0.0
+grid2op>=1.12.0
+gymnasium>=1.2.0
+LightSim2Grid>=0.11.0
+
+# Web 仪表板
+streamlit>=1.40.0
+altair>=5.0.0
+plotly>=5.0.0
+
+# 工具
+numpy>=1.24.0
+pandas>=2.0.0
+Pillow>=10.0.0
+pyyaml>=6.0.0
+tqdm>=4.65.0
+dill>=0.3.0,<0.3.9
 ```
 
----
+### 📸 界面截图
 
-## 📄 技术栈
+<div align="center">
 
-| 组件 | 技术 |
-|------|------|
-| 视觉模型 | Qwen2.5-VL-7B-Instruct |
-| 文本模型 | Qwen2.5-7B-Instruct |
-| 嵌入模型 | sentence-transformers |
-| 向量库 | ChromaDB |
-| RL 算法 | PPO (Stable-Baselines3) |
-| 电网仿真 | Grid2Op |
-| Web 框架 | Streamlit |
-| 量化 | BitsAndBytes 4-bit |
+| 视觉检测 | 知识检索 | RL 优化 |
+|:--------:|:--------:|:-------:|
+| ![Vision](docs/images/vision.png) | ![RAG](docs/images/rag.png) | ![RL](docs/images/rl.png) |
+
+</div>
 
 ---
 
-## 🤝 贡献
+## 📄 License
 
-欢迎提交 Issue 和 Pull Request！
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
----
+## 🙏 Acknowledgments
 
-## 📜 许可证
+- [Qwen2.5](https://github.com/QwenLM/Qwen2.5) - Large Language Models
+- [Grid2Op](https://github.com/rte-france/Grid2Op) - Power Grid Simulation
+- [Stable-Baselines3](https://github.com/DLR-RM/stable-baselines3) - RL Algorithms
+- [LangChain](https://github.com/langchain-ai/langchain) - LLM Application Framework
 
-MIT License © 2024 PowerNexus Team
+## 📮 Contact
+
+For questions and support, please open an issue on GitHub or contact the author: **TanXiaoke**.
 
 ---
 
 <div align="center">
-  <b>PowerNexus - 智能电网巡检与决策系统</b><br>
-  Powered by Qwen2.5 | Made with ❤️
+
+**PowerNexus** © 2025 | Author: **TanXiaoke** | Powered by Qwen2.5
+
 </div>
