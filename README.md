@@ -432,6 +432,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [Grid2Op](https://github.com/rte-france/Grid2Op) - Power Grid Simulation
 - [Stable-Baselines3](https://github.com/DLR-RM/stable-baselines3) - RL Algorithms
 - [LangChain](https://github.com/langchain-ai/langchain) - LLM Application Framework
+- [Gemini](https://gemini.google.com/) - Coding
 
 ## 📮 Contact
 
