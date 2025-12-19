@@ -196,11 +196,13 @@ class WorkflowResult:
         maintenance_decision: 维护决策
         rl_action: RL 动作
         report: 最终报告
+        report_guidance: 技术标准建议 (由 LLM 合成)
         steps: 执行步骤记录
     """
     state: WorkflowState = WorkflowState.IDLE
     defect_result: Optional[Dict] = None
     rag_context: str = ""
+    report_guidance: str = ""
     maintenance_decision: MaintenanceDecision = MaintenanceDecision.NO_ACTION
     rl_action: int = 0
     rl_safe_to_disconnect: bool = False
@@ -437,27 +439,17 @@ class MainAgent:
         defect_type = result.defect_result.get("defect_type", "unknown")
         
         if not self._rag_ready:
-            # 使用模拟上下文
-            result.rag_context = f"""
-### 参考 1 | 来源: DL/T 596-2018
-绝缘子缺陷处理规程：
-1. 发现裂纹应立即上报
-2. 评估裂纹长度和深度
-3. 必要时安排更换
-
-### 参考 2 | 来源: GB 50150-2016  
-绝缘子更换流程：
-1. 确认线路停电
-2. 拆除故障绝缘子
-3. 安装新绝缘子
-4. 进行耐压试验
-"""
+            # 使用模拟上下文和回答
+            result.rag_context = "模拟技术标准原文..."
+            result.report_guidance = "建议：加强巡检，视裂纹深度决定是否更换。"
             result.add_step("consult", "使用模拟 RAG 结果")
         else:
             query = f"{defect_type} 维护处理规程 检修标准"
-            rag_result = self.knowledge_base.query(query, top_k=3)
+            # 使用带 LLM 合成的查询方法
+            rag_result = self.knowledge_base.query_and_synthesize(query, top_k=3)
             result.rag_context = rag_result.formatted_context
-            result.add_step("consult", f"检索到 {rag_result.num_results} 条相关标准")
+            result.report_guidance = rag_result.synthesized_answer
+            result.add_step("consult", f"检索并合成完成 | 结果数: {rag_result.num_results}")
         
         logger.info(f"咨询完成 | 上下文长度: {len(result.rag_context)} 字符")
         
@@ -608,7 +600,12 @@ class MainAgent:
 {decision_text}
 
 {'─'*60}
-                    相关技术标准
+                    技术标准指导与建议
+{'─'*60}
+{result.report_guidance if result.report_guidance else '暂无合成建议'}
+
+{'─'*60}
+                    相关技术标准原文
 {'─'*60}
 
 {result.rag_context[:500] if result.rag_context else '未检索到相关标准'}

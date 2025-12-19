@@ -52,7 +52,7 @@ def print_banner():
 
 def check_python_version():
     """检查 Python 版本"""
-    print(f"{Colors.BLUE}[1/4]{Colors.END} 检查 Python 版本...")
+    print(f"{Colors.BLUE}[1/5]{Colors.END} 检查 Python 版本...")
     
     version = sys.version_info
     if version.major < 3 or (version.major == 3 and version.minor < 8):
@@ -66,12 +66,13 @@ def check_python_version():
 
 def check_dependencies():
     """检查核心依赖"""
-    print(f"\n{Colors.BLUE}[2/4]{Colors.END} 检查核心依赖...")
+    print(f"\n{Colors.BLUE}[2/5]{Colors.END} 检查核心依赖...")
     
     dependencies = {
         "streamlit": "Streamlit (Web UI)",
         "numpy": "NumPy (数值计算)",
         "PIL": "Pillow (图像处理)",
+        "openai": "OpenAI (API 访问)",
     }
     
     optional_deps = {
@@ -111,9 +112,23 @@ def check_dependencies():
     return True
 
 
+def check_config():
+    """检查配置文件"""
+    print(f"\n{Colors.BLUE}[3/5]{Colors.END} 检查配置文件...")
+    
+    config_path = PROJECT_ROOT / "config" / "config.yaml"
+    if not config_path.exists():
+        print(f"  {Colors.RED}✗ 配置文件不存在: {config_path}{Colors.END}")
+        print(f"  {Colors.YELLOW}请参考 config/config_example.yaml 创建配置文件{Colors.END}")
+        return False
+    
+    print(f"  {Colors.GREEN}✓ 配置文件存在{Colors.END}")
+    return True
+
+
 def check_data_directory():
     """检查数据目录"""
-    print(f"\n{Colors.BLUE}[3/4]{Colors.END} 检查数据目录...")
+    print(f"\n{Colors.BLUE}[4/5]{Colors.END} 检查数据目录...")
     
     data_dir = PROJECT_ROOT / "data"
     images_dir = data_dir / "images"
@@ -153,7 +168,7 @@ def check_data_directory():
 
 def check_cuda():
     """检查 CUDA 可用性"""
-    print(f"\n{Colors.BLUE}[4/4]{Colors.END} 检查 GPU 状态...")
+    print(f"\n{Colors.BLUE}[5/5]{Colors.END} 检查 GPU 状态...")
     
     try:
         import torch
@@ -209,12 +224,16 @@ def main():
         sys.exit(1)
     
     deps_ok = check_dependencies()
+    config_ok = check_config()
     check_data_directory()
     check_cuda()
     
-    if not deps_ok:
-        print(f"\n{Colors.RED}请先安装缺少的依赖后再运行{Colors.END}")
-        print(f"{Colors.BOLD}pip install -r requirements.txt{Colors.END}")
+    if not deps_ok or not config_ok:
+        if not deps_ok:
+            print(f"\n{Colors.RED}请先安装缺少的依赖：{Colors.END}")
+            print(f"{Colors.BOLD}pip install -r requirements.txt{Colors.END}")
+        if not config_ok:
+            print(f"\n{Colors.RED}请先检查配置文件{Colors.END}")
         sys.exit(1)
     
     # 启动服务

@@ -38,6 +38,20 @@ PowerNexus is an intelligent power grid inspection and decision-support system b
 | 🤖 **RL Optimization** | PPO agent with LLM-generated explanations for grid topology actions |
 | 📊 **Dashboard** | Streamlit-based interface with model status and knowledge base update tools |
 
+### 📥 Input & 📤 Output
+
+#### 🔹 System Input
+- **Equipment Images**: `.jpg`, `.jpeg`, `.png` photos of power grid infrastructure (insulators, transformers, etc.).
+- **Knowledge Documents**: Technical manuals, maintenance guides, and standards in `.pdf`, `.md`, or `.txt` formats.
+- **Natural Language Queries**: Questions regarding equipment maintenance, fault diagnosis, or technical standards.
+- **Grid Telemetry**: Real-time or simulated grid state data (line loads, voltages, etc.).
+
+#### 🔸 System Output
+- **Intelligent Diagnosis**: Multi-modal analysis results including defect type, confidence, and severity.
+- **Expert Guidance**: LLM-synthesized technical suggestions strictly based on retrieved technical standards (RAG).
+- **Topology Optimization**: Recommended grid topology actions (e.g., line switching) to optimize load distribution.
+- **Unified Reports**: Comprehensive, professional inspection and maintenance reports.
+
 ### 🏗️ Architecture
 
 ```
@@ -153,15 +167,15 @@ ingestor.ingest_directory('data/manuals')
 
 | Package | Version | Description |
 |---------|---------|-------------|
+| openai | ≥1.0.0 | **Primary API Client** for all LLM/VL/Embedding models |
+| pypdf | ≥4.0.0 | PDF document parser for knowledge ingestion |
 | torch | ≥2.0.0 | PyTorch deep learning framework |
 | transformers | ≥4.41.0 | Hugging Face Transformers |
 | streamlit | ≥1.40.0 | Web dashboard framework |
 | stable-baselines3 | ≥2.0.0 | RL algorithms (PPO) |
 | grid2op | ≥1.12.0 | Power grid simulation |
-| gymnasium | ≥1.2.0 | RL environment interface |
 | chromadb | ≥1.3.0 | Vector database for RAG |
-| sentence-transformers | ≥5.0.0 | Text embeddings |
-| bitsandbytes | ≥0.49.0 | 4-bit quantization |
+| sentence-transformers | ≥5.0.0 | Text embeddings (API-based) |
 | langchain | ≥1.0.0 | LLM application framework |
 
 #### Full Requirements
@@ -171,19 +185,18 @@ ingestor.ingest_directory('data/manuals')
 torch>=2.0.0
 transformers>=4.41.0
 accelerate>=1.0.0
-bitsandbytes>=0.49.0
-sentence-transformers>=5.0.0
 
 # LLM & RAG
+openai>=1.0.0
+pypdf>=4.0.0
 langchain>=1.0.0
 chromadb>=1.3.0
-huggingface-hub>=0.20.0
+sentence-transformers>=5.0.0
 
 # Reinforcement Learning
 stable-baselines3>=2.0.0
 grid2op>=1.12.0
 gymnasium>=1.2.0
-LightSim2Grid>=0.11.0
 
 # Web Dashboard
 streamlit>=1.40.0
@@ -221,6 +234,20 @@ PowerNexus 是一个基于 **Qwen2.5** 大语言模型家族的电网智能巡�
 | 🤖 **RL 优化** | 基于 Grid2Op 环境的 PPO 智能体进行电网拓扑优化 |
 | 📊 **监控仪表板** | 基于 Streamlit 的交互式监控界面 |
 | 🔧 **数据模拟** | 生成真实的电网状态快照用于测试和训练 |
+
+### 📥 输入与 📤 输出
+
+#### 🔹 系统输入
+- **设备图像**: 电力基础设施（如绝缘子、变压器等）的 `.jpg`, `.jpeg`, `.png` 格式照片。
+- **知识文档**: `.pdf`, `.md` 或 `.txt` 格式的技术手册、维护指南和标准。
+- **自然语言查询**: 关于设备维护、故障诊断或技术标准的文字问题。
+- **电网遥测**: 实时或模拟的电网状态数据（线路负载、电压等）。
+
+#### 🔸 系统输出
+- **智能诊断**: 多模态分析结果，包括缺陷类型、置信度和严重程度。
+- **专家指导**: 严格基于检索到的技术标准 (RAG)，由 LLM 合成的针对性修复建议。
+- **拓扑优化**: 推荐的电网拓扑操作（如开关动作），以优化负载分布。
+- **联合报表**: 涵盖视觉、知识和决策信息的专业巡检与运维报告。
 
 ### 🏗️ 项目结构
 
@@ -338,18 +365,18 @@ ingestor.ingest_directory('data/manuals')
 
 #### 核心依赖
 
-| 包名 | 版本 | 描述 |
-|------|------|------|
-| torch | ≥2.0.0 | PyTorch 深度学习框架 |
+| Package | Version | Description |
+|---------|---------|-------------|
+| openai | ≥1.0.0 | **Primary API Client** for all LLM/VL/Embedding models |
+| pypdf | ≥4.0.0 | PDF document parser for knowledge ingestion |
+| torch | ≥2.0.0 | PyTorch deep learning framework |
 | transformers | ≥4.41.0 | Hugging Face Transformers |
-| streamlit | ≥1.40.0 | Web 仪表板框架 |
-| stable-baselines3 | ≥2.0.0 | RL 算法 (PPO) |
-| grid2op | ≥1.12.0 | 电网仿真 |
-| gymnasium | ≥1.2.0 | RL 环境接口 |
-| chromadb | ≥1.3.0 | RAG 向量数据库 |
-| sentence-transformers | ≥5.0.0 | 文本嵌入 |
-| bitsandbytes | ≥0.49.0 | 4-bit 量化 |
-| langchain | ≥1.0.0 | LLM 应用框架 |
+| streamlit | ≥1.40.0 | Web dashboard framework |
+| stable-baselines3 | ≥2.0.0 | RL algorithms (PPO) |
+| grid2op | ≥1.12.0 | Power grid simulation |
+| chromadb | ≥1.3.0 | Vector database for RAG |
+| sentence-transformers | ≥5.0.0 | Text embeddings (API-based) |
+| langchain | ≥1.0.0 | LLM application framework |
 
 #### 完整依赖列表
 
@@ -358,26 +385,23 @@ ingestor.ingest_directory('data/manuals')
 torch>=2.0.0
 transformers>=4.41.0
 accelerate>=1.0.0
-bitsandbytes>=0.49.0
-sentence-transformers>=5.0.0
 
 # LLM & RAG
+openai>=1.0.0
+pypdf>=4.0.0
 langchain>=1.0.0
 chromadb>=1.3.0
-huggingface-hub>=0.20.0
+sentence-transformers>=5.0.0
 
 # 强化学习
 stable-baselines3>=2.0.0
 grid2op>=1.12.0
 gymnasium>=1.2.0
-LightSim2Grid>=0.11.0
 
 # Web 仪表板
 streamlit>=1.40.0
 altair>=5.0.0
 plotly>=5.0.0
-
-# 工具
 numpy>=1.24.0
 pandas>=2.0.0
 Pillow>=10.0.0

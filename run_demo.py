@@ -15,6 +15,7 @@ PowerNexus - 完整演示脚本
 import logging
 import sys
 from pathlib import Path
+from config.settings import config as global_config
 
 # 将项目根目录添加到路径
 project_root = Path(__file__).parent
@@ -80,9 +81,9 @@ def demo_scenario_high_load():
     print("Step 0: 初始化 PowerNexus 智能体系统")
     print("-"*70)
     
-    # 创建智能体 (Mock 模式)
-    agent = MainAgent(use_mock=True)
-    print(f"✓ 智能体初始化完成")
+    # 创建智能体 (从配置读取 Mock 模式)
+    agent = MainAgent(use_mock=global_config.app.use_mock)
+    print(f"✓ 智能体初始化完成 | Mock: {global_config.app.use_mock}")
     print(f"  - 感知模块: {'就绪' if agent._perception_ready else '模拟模式'}")
     print(f"  - RAG 模块: {'就绪' if agent._rag_ready else '模拟模式'}")
     print(f"  - RL 模块: {'就绪' if agent._rl_ready else '模拟模式'}")
@@ -100,7 +101,7 @@ def demo_scenario_high_load():
     
     # 构建输入
     input_data = InspectionInput(
-        image_path="./drone_images/insulator_crack_035.jpg",
+        image_path="data/images/insulator_defect.jpg",
         equipment_id="INS-L1-035-A",
         location="220kV L1 线路 #35 塔 A相",
         grid_telemetry=grid_telemetry,
@@ -190,13 +191,13 @@ def demo_scenario_normal_load():
     from src.main import MainAgent, InspectionInput, GridTelemetry
     
     # 创建智能体
-    agent = MainAgent(use_mock=True)
+    agent = MainAgent(use_mock=global_config.app.use_mock)
     
     # 正常负荷
     grid_telemetry = GridTelemetry.create_mock("normal")
     
     input_data = InspectionInput(
-        image_path="./drone_images/rust_041.jpg",
+        image_path="data/images/insulator_normal.jpg",
         equipment_id="MTL-L2-041-B",
         location="110kV L2 线路 #41 塔 金具",
         grid_telemetry=grid_telemetry,
@@ -223,12 +224,12 @@ def demo_workflow_steps():
     
     from src.main import MainAgent, InspectionInput, GridTelemetry, WorkflowResult
     
-    agent = MainAgent(use_mock=True)
+    agent = MainAgent(use_mock=global_config.app.use_mock)
     
     # 准备输入
     grid_telemetry = GridTelemetry.create_mock("high")
     input_data = InspectionInput(
-        image_path="./drone_images/oil_leak_012.jpg",
+        image_path="data/images/insulator_defect.jpg",
         equipment_id="TRF-SS3-001",
         location="35kV 变电站 #3 主变压器",
         grid_telemetry=grid_telemetry,
